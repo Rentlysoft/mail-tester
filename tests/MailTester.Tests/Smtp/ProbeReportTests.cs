@@ -229,6 +229,31 @@ public class ProbeReportTests
         Assert.Equal("ok", row.Substring(ehloColumn, 5).Trim());
     }
 
+    [Fact]
+    public void The_no_recognisable_code_fallback_keeps_the_tiempo_column_aligned()
+    {
+        // "credenciales rechazadas" is 23 characters, three past the AUTH column's width of 20;
+        // if it were ever allowed to widen that column, TIEMPO would shift out of line with the
+        // header and with every other row.
+        var okResult = Ok(587, SecurityMode.StartTls, secure: true, authenticated: true, 100);
+        var fallbackResult = Failed(465, SecurityMode.StartTls, AttemptPhase.Authenticate,
+            new AuthenticationException("Authentication failed."), 84);
+        var results = new[] { okResult, fallbackResult };
+
+        var text = Render(Options("a@x.com"), results, recommended: null);
+        var lines = text.ReplaceLineEndings("\n").Split('\n');
+        var header = lines.Single(l => l.StartsWith("PORT", StringComparison.Ordinal));
+        var tiempoColumn = header.IndexOf("TIEMPO", StringComparison.Ordinal);
+
+        foreach (var result in results)
+        {
+            var row = lines.Single(l => l.TrimStart().StartsWith(result.Port.ToString(), StringComparison.Ordinal));
+            var expected = $"{result.Total.TotalMilliseconds,6:F0} ms";
+
+            Assert.Equal(expected, row.Substring(tiempoColumn, expected.Length));
+        }
+    }
+
     [Theory]
     [InlineData(25)]
     [InlineData(2525)]

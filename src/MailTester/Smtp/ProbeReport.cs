@@ -106,9 +106,12 @@ internal static class ProbeReport
     {
         var message = exception.Message;
 
+        // Kept to 20 characters or fewer: the AUTH column is only that wide, and .NET's composite
+        // formatter does not truncate, so anything longer would shift TIEMPO out of line with the
+        // header and with every other row.
         return message.Length > 3 && message[3] == ':' && message[..3].All(char.IsAsciiDigit)
             ? $"{message[..3]} rechazado"
-            : "credenciales rechazadas";
+            : "acceso rechazado";
     }
 
     static string SendCommand(CliOptions options, AttemptResult recommended)

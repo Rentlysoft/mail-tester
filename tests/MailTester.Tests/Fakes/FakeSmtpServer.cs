@@ -96,8 +96,10 @@ internal sealed record FakeSmtpScript
 }
 
 /// <summary>
-/// A single-connection SMTP server on an ephemeral loopback port. Each test starts its own,
-/// so there is no shared state and no hardcoded port.
+/// An SMTP server on an ephemeral loopback port. Each test starts its own, so there is no
+/// shared state and no hardcoded port. By default it serves exactly one connection; a test
+/// that needs several attempts to hit the same port -- one after another, never concurrently --
+/// asks for that many sessions up front.
 /// </summary>
 internal sealed class FakeSmtpServer : IDisposable
 {
@@ -116,12 +118,14 @@ internal sealed class FakeSmtpServer : IDisposable
     readonly object sync = new();
     readonly List<string> commands = [];
     readonly FakeSmtpScript script;
+    readonly int sessions;
     string? dataReceived;
 
-    FakeSmtpServer(FakeSmtpScript script, TcpListener listener)
+    FakeSmtpServer(FakeSmtpScript script, TcpListener listener, int sessions)
     {
         this.script = script;
         this.listener = listener;
+        this.sessions = sessions;
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         session = Task.Run(RunAsync);
     }
@@ -146,11 +150,11 @@ internal sealed class FakeSmtpServer : IDisposable
         }
     }
 
-    public static FakeSmtpServer Start(FakeSmtpScript script)
+    public static FakeSmtpServer Start(FakeSmtpScript script, int sessions = 1)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        return new FakeSmtpServer(script, listener);
+        return new FakeSmtpServer(script, listener, sessions);
     }
 
     public void Dispose()
@@ -184,7 +188,17 @@ internal sealed class FakeSmtpServer : IDisposable
 
     async Task RunAsync()
     {
-        using var tcp = await listener.AcceptTcpClientAsync(cancellation.Token);
+        for (var i = 0; i < sessions; i++)
+        {
+            using var tcp = await listener.AcceptTcpClientAsync(cancellation.Token);
+            await HandleSessionAsync(tcp);
+        }
+    }
+
+    /// <summary>Handles exactly one accepted connection, from the greeting through however the
+    /// script decides to end it.</summary>
+    async Task HandleSessionAsync(TcpClient tcp)
+    {
         var raw = tcp.GetStream();
         SslStream? tls = null;
 
@@ -240,6 +254,13 @@ internal sealed class FakeSmtpServer : IDisposable
                     recognizedCommand = true;
                     await writer.WriteLineAsync("220 2.0.0 Ready to start TLS");
                     stream = tls = await UpgradeAsync(raw);
+
+                    // The upgrade just completed, but nothing has been read over the new
+                    // encrypted stream yet. A client that rejects the certificate tears the
+                    // connection down right here without sending anything at all; that abrupt
+                    // close belongs with "no real command recognised on this stream", not with a
+                    // fault in the middle of an established conversation.
+                    recognizedCommand = false;
 
                     // The client re-reads capabilities with a second EHLO sent over the now
                     // encrypted channel; the loop picks it up through the swapped reader on its

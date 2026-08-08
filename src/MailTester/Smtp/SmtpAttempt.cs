@@ -149,10 +149,12 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
             // Our own deadline fired. Surfacing it as a timeout keeps the explainer from having
             // to tell a user's Ctrl+C apart from an expired budget.
             var expired = new TimeoutException($"La operación superó el timeout de {options.TimeoutSeconds} s en la fase {phase}.");
+            CaptureConnectionFacts(client);
             return Build(port, security, inspector, expired);
         }
         catch (Exception ex)
         {
+            CaptureConnectionFacts(client);
             return Build(port, security, inspector, ex);
         }
         finally
@@ -248,6 +250,13 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
         return mechanism;
     }
 
+    /// <summary>
+    /// Reads back what MailKit already knows about the connection so far. Called on every exit
+    /// path, not just success: MailKit parses the EHLO response before it attempts STARTTLS, so
+    /// a handshake that fails after a successful EHLO still leaves capabilities and offered
+    /// mechanisms sitting on the client, and a failed attempt that never reports them would look
+    /// like the EHLO itself never happened.
+    /// </summary>
     void CaptureConnectionFacts(SmtpClient client)
     {
         secure = client.IsSecure;

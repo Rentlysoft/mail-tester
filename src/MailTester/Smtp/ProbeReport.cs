@@ -15,7 +15,7 @@ internal static class ProbeReport
         log.Blank();
         log.Banner($"MATRIZ DE RESULTADOS — {options.Host}");
         log.Blank();
-        log.Text("PORT  SECURITY               TCP    TLS    EHLO   AUTH                  TIEMPO");
+        log.Text("PORT   SECURITY               TCP    TLS    EHLO   AUTH                  TIEMPO");
 
         foreach (var result in results)
             log.Text(Row(result, options, ReferenceEquals(result, recommended)));
@@ -42,7 +42,9 @@ internal static class ProbeReport
     {
         var marker = recommended ? "   <- recomendado" : string.Empty;
 
-        return $"{result.Port,4}  {result.Security.ToCliName(),-21}  "
+        // Width 5, not 4: --port accepts values up to 65535, and a 5-digit port must not shift
+        // every column after it out of alignment with the header.
+        return $"{result.Port,5}  {result.Security.ToCliName(),-21}  "
                + $"{Tcp(result),-5}  {Tls(result),-5}  {Ehlo(result),-5}  {Auth(result, options),-20}  "
                + $"{result.Total.TotalMilliseconds,6:F0} ms{marker}";
     }

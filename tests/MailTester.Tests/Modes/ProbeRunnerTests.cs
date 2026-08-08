@@ -21,13 +21,32 @@ public class ProbeRunnerTests
         TimeoutSeconds = 5,
     };
 
-    static async Task<(ExitCode Code, string Text)> RunAsync(CliOptions options)
+    static async Task<(ExitCode Code, string Text)> RunAsync(CliOptions options, CancellationToken cancellationToken = default)
     {
         var output = new StringWriter();
         using var log = new ConsoleLog(output, null, new NullColorizer(), () => TimeSpan.Zero);
 
-        var code = await ProbeRunner.RunAsync(options, log, CancellationToken.None);
+        var code = await ProbeRunner.RunAsync(options, log, cancellationToken);
         return (code, output.ToString());
+    }
+
+    /// <summary>Counts how many times <paramref name="marker"/> starts within [start, end) of
+    /// <paramref name="text"/>, so a test can assert that something belonging to one attempt
+    /// never leaks into another attempt's slice of the log.</summary>
+    static int Occurrences(string text, string marker, int start, int end)
+    {
+        var count = 0;
+        var index = start;
+
+        while (true)
+        {
+            index = text.IndexOf(marker, index, StringComparison.Ordinal);
+            if (index < 0 || index >= end)
+                return count;
+
+            count++;
+            index += marker.Length;
+        }
     }
 
     [Fact]
@@ -72,5 +91,68 @@ public class ProbeRunnerTests
         var (_, text) = await RunAsync(Options(server.Port));
 
         Assert.Contains("INTENTO 1/1", text);
+    }
+
+    [Fact]
+    public async Task Three_combinations_against_one_port_run_one_after_another_without_interleaving()
+    {
+        // Naming a port but not a security mode sweeps starttls, ssl and none against that one
+        // port -- three attempts hitting the same fake, one connection at a time.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working(), sessions: 3);
+
+        var options = new CliOptions
+        {
+            Host = "127.0.0.1",
+            Port = server.Port,
+            PortSpecified = true,
+            Probe = true,
+            TimeoutSeconds = 5,
+        };
+
+        var (code, text) = await RunAsync(options);
+
+        var banner1 = text.IndexOf("INTENTO 1/3", StringComparison.Ordinal);
+        var banner2 = text.IndexOf("INTENTO 2/3", StringComparison.Ordinal);
+        var banner3 = text.IndexOf("INTENTO 3/3", StringComparison.Ordinal);
+
+        Assert.True(banner1 >= 0, "El intento 1/3 no se anunció.");
+        Assert.True(banner1 < banner2, "El intento 2/3 debe anunciarse después del 1/3.");
+        Assert.True(banner2 < banner3, "El intento 3/3 debe anunciarse después del 2/3.");
+
+        // Every attempt logs this step first, regardless of how it then succeeds or fails. If
+        // the attempts ever ran concurrently instead of one after another, their dialogues
+        // would interleave and an occurrence would land outside its own attempt's segment.
+        const string dnsStep = "1/6 Resolviendo DNS de 127.0.0.1";
+        Assert.Equal(1, Occurrences(text, dnsStep, banner1, banner2));
+        Assert.Equal(1, Occurrences(text, dnsStep, banner2, banner3));
+        Assert.Equal(1, Occurrences(text, dnsStep, banner3, text.Length));
+
+        // Of the three, only the third (plain, no TLS) actually works against this script, and
+        // the sweep still finds and recommends it.
+        Assert.Equal(ExitCode.Success, code);
+    }
+
+    [Fact]
+    public async Task Cancellation_stops_the_sweep_instead_of_marching_on_to_the_next_combination()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working(), sessions: 3);
+
+        var options = new CliOptions
+        {
+            Host = "127.0.0.1",
+            Port = server.Port,
+            PortSpecified = true,
+            Probe = true,
+            TimeoutSeconds = 5,
+        };
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var (_, text) = await RunAsync(options, cancellation.Token);
+
+        Assert.Contains("INTENTO 1/3", text);
+        Assert.DoesNotContain("INTENTO 2/3", text);
+        Assert.DoesNotContain("INTENTO 3/3", text);
     }
 }

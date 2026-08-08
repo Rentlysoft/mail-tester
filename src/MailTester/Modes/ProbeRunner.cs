@@ -23,6 +23,12 @@ internal static class ProbeRunner
 
             var attempt = new SmtpAttempt(options, log);
             results.Add(await attempt.RunAsync(combination.Port, combination.Security, sendMessage: false, cancellationToken));
+
+            // A real Ctrl+C surfaces here as an ordinary failed AttemptResult -- SmtpAttempt
+            // only recognises its own timeout as special, not the caller's token -- so the loop
+            // has to check explicitly instead of trusting the result to say "stop".
+            if (cancellationToken.IsCancellationRequested)
+                break;
         }
 
         var recommended = ProbeMatrix.Recommend(results, options.ShouldAuthenticate);

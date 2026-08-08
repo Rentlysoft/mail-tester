@@ -262,6 +262,25 @@ public class SmtpAttemptTests
     }
 
     [Fact]
+    public async Task A_rejected_certificate_still_reports_the_capabilities_the_ehlo_already_saw()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.WithStartTls());
+        var (attempt, _) = Build(Options() with { AllowInvalidCert = false });
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.StartTls, sendMessage: true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AttemptPhase.TlsHandshake, result.FailedPhase);
+        // MailKit parses the EHLO response -- which advertises STARTTLS and AUTH -- before it
+        // ever attempts the handshake that then fails on the untrusted self-signed certificate.
+        // The EHLO plainly succeeded, and the result must say so instead of looking like the
+        // connection never got that far.
+        Assert.NotEmpty(result.Capabilities);
+        Assert.Equal(["LOGIN", "PLAIN"], result.AuthMechanismsOffered);
+        Assert.False(result.Secure);
+    }
+
+    [Fact]
     public async Task Implicit_tls_negotiates_before_the_greeting_is_read()
     {
         using var server = FakeSmtpServer.Start(FakeSmtpScript.WithImplicitTls());

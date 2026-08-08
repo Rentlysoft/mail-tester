@@ -1,4 +1,5 @@
 using MailKit.Net.Smtp;
+using MailKit.Security;
 using MailTester.Cli;
 using MailTester.Output;
 using MailTester.Smtp;
@@ -141,5 +142,53 @@ public class ProbeReportTests
 
         // TCP failed, so nothing after it was attempted and nothing after it is reported.
         Assert.Equal(1, row.Split("FAIL").Length - 1);
+    }
+
+    [Fact]
+    public void A_tls_failure_after_a_successful_ehlo_still_reports_ehlo_ok()
+    {
+        var results = new[]
+        {
+            Failed(587, SecurityMode.StartTls, AttemptPhase.TlsHandshake, new SslHandshakeException("cert inválido"), 120) with
+            {
+                // The EHLO capabilities MailKit parsed before attempting the handshake, exactly
+                // as a real attempt reports them on this failure path.
+                Capabilities = ["AUTH=PLAIN LOGIN", "STARTTLS"],
+            },
+        };
+
+        var text = Render(Options(), results, recommended: null);
+        var lines = text.ReplaceLineEndings("\n").Split('\n');
+        var header = lines.Single(l => l.StartsWith("PORT", StringComparison.Ordinal));
+        var row = lines.Single(l => l.Contains("587"));
+
+        var tlsColumn = header.IndexOf("TLS", StringComparison.Ordinal);
+        var ehloColumn = header.IndexOf("EHLO", StringComparison.Ordinal);
+
+        // The server answered EHLO -- and advertised STARTTLS -- before the handshake itself
+        // failed on the certificate. That EHLO succeeded, and its column must say so instead of
+        // reading as a failure or as a phase the attempt never reached.
+        Assert.Equal("FAIL", row.Substring(tlsColumn, 5).Trim());
+        Assert.Equal("ok", row.Substring(ehloColumn, 5).Trim());
+    }
+
+    [Theory]
+    [InlineData(25)]
+    [InlineData(2525)]
+    [InlineData(65535)]
+    public void The_security_column_stays_aligned_regardless_of_how_many_digits_the_port_has(int port)
+    {
+        var results = new[] { Ok(port, SecurityMode.StartTlsIfAvailable, secure: true, authenticated: true, 1) };
+
+        var text = Render(Options(), results, results[0]);
+        var lines = text.ReplaceLineEndings("\n").Split('\n');
+        var header = lines.Single(l => l.StartsWith("PORT", StringComparison.Ordinal));
+        // The "Recomendado:" line below the table names the same port and security mode, so the
+        // row is identified by starting with the port digits rather than merely containing them.
+        var row = lines.Single(l => l.TrimStart().StartsWith(port.ToString(), StringComparison.Ordinal));
+
+        Assert.Equal(
+            header.IndexOf("SECURITY", StringComparison.Ordinal),
+            row.IndexOf("starttls-if-available", StringComparison.Ordinal));
     }
 }

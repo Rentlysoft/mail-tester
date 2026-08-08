@@ -125,6 +125,34 @@ public class CertificateInspectorTests
     }
 
     [Fact]
+    public void A_certificate_with_exactly_one_day_left_uses_singular_wording()
+    {
+        var (inspector, output) = Build("smtp.foo.com", allowInvalid: true);
+        // Created just under 2 days before expiry: by the time Validate runs a moment later,
+        // flooring the remaining time lands on exactly 1 whole day left.
+        using var certificate = SelfSigned("smtp.foo.com", ["smtp.foo.com"], daysUntilExpiry: 2);
+
+        inspector.Validate(this, certificate, null, SslPolicyErrors.None);
+
+        Assert.Contains("1 día restante)", output.ToString());
+        Assert.DoesNotContain("1 días", output.ToString());
+    }
+
+    [Fact]
+    public void A_certificate_expired_exactly_one_day_ago_uses_singular_wording()
+    {
+        var (inspector, output) = Build("smtp.foo.com", allowInvalid: true);
+        // NotAfter equal to the creation instant: by the time Validate runs a moment later, the
+        // certificate is just past due, flooring to exactly 1 whole day expired.
+        using var certificate = SelfSigned("smtp.foo.com", ["smtp.foo.com"], daysUntilExpiry: 0);
+
+        inspector.Validate(this, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors);
+
+        Assert.Contains("expirado hace 1 día)", output.ToString());
+        Assert.DoesNotContain("1 días", output.ToString());
+    }
+
+    [Fact]
     public void Chain_status_is_reported_alongside_validation_errors()
     {
         var (inspector, output) = Build("smtp.foo.com", allowInvalid: false);

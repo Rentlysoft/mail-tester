@@ -78,10 +78,12 @@ internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, 
     {
         var window = $"válido {cert.NotBefore:yyyy-MM-dd} .. {cert.NotAfter:yyyy-MM-dd}";
         var days = (int)Math.Floor((cert.NotAfter - DateTime.Now).TotalDays);
+        var absDays = Math.Abs(days);
+        var day = absDays == 1 ? "día" : "días";
 
         return days < 0
-            ? $"{window} (expirado hace {-days} días)"
-            : $"{window} ({days} días restantes)";
+            ? $"{window} (expirado hace {absDays} {day})"
+            : $"{window} ({absDays} {day} restante{(absDays == 1 ? "" : "s")})";
     }
 
     static IReadOnlyList<string> DnsNames(X509Certificate2 cert) =>

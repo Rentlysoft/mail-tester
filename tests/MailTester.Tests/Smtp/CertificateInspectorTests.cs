@@ -125,6 +125,37 @@ public class CertificateInspectorTests
     }
 
     [Fact]
+    public void Chain_status_is_reported_alongside_validation_errors()
+    {
+        var (inspector, output) = Build("smtp.foo.com", allowInvalid: false);
+        using var certificate = SelfSigned("smtp.foo.com", ["smtp.foo.com"]);
+        using var chain = new X509Chain();
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        chain.Build(certificate);
+
+        inspector.Validate(this, certificate, chain, SslPolicyErrors.RemoteCertificateChainErrors);
+
+        Assert.NotEmpty(chain.ChainStatus);
+        Assert.Contains("cadena", output.ToString());
+    }
+
+    [Fact]
+    public void A_clean_result_prints_no_chain_status_even_when_a_chain_is_supplied()
+    {
+        var (inspector, output) = Build("smtp.foo.com", allowInvalid: false);
+        using var certificate = SelfSigned("smtp.foo.com", ["smtp.foo.com"]);
+        using var chain = new X509Chain();
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        chain.Build(certificate);
+
+        inspector.Validate(this, certificate, chain, SslPolicyErrors.None);
+
+        var text = output.ToString();
+        Assert.DoesNotContain("cadena", text);
+        Assert.DoesNotContain("WARN", text);
+    }
+
+    [Fact]
     public void A_missing_certificate_is_reported_rather_than_crashing()
     {
         var (inspector, output) = Build("smtp.foo.com", allowInvalid: false);

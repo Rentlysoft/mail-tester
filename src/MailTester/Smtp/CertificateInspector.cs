@@ -63,10 +63,10 @@ internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, 
                 if (flag != SslPolicyErrors.None && errors.HasFlag(flag))
                     log.Line(LogLevel.Warn, $"  {flag}: {Explain(flag)}");
             }
-        }
 
-        foreach (var status in chain?.ChainStatus ?? [])
-            log.Line(LogLevel.Warn, $"  cadena {status.Status}: {status.StatusInformation?.Trim()}");
+            foreach (var status in chain?.ChainStatus ?? [])
+                log.Line(LogLevel.Warn, $"  cadena {status.Status}: {status.StatusInformation?.Trim()}");
+        }
     }
 
     static string Validity(X509Certificate2 cert)

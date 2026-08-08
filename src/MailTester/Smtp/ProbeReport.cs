@@ -33,9 +33,7 @@ internal static class ProbeReport
                               + $", {recommended.Total.TotalMilliseconds:F0} ms).");
         log.Blank();
         log.Text("Para enviar un mail de prueba con esa configuración:");
-
-        foreach (var line in SendCommand(options, recommended))
-            log.Text("  " + line);
+        log.Text("  " + SendCommand(options, recommended));
     }
 
     static string Row(AttemptResult result, CliOptions options, bool recommended)
@@ -51,8 +49,9 @@ internal static class ProbeReport
 
     static string Tcp(AttemptResult result) => result.FailedPhase switch
     {
-        AttemptPhase.Dns => "-",
-        AttemptPhase.TcpConnect => "FAIL",
+        // DNS failing means there was never an address to connect to, but the row still has to
+        // read as a failed attempt rather than as nine dashes that look like nothing ran.
+        AttemptPhase.Dns or AttemptPhase.TcpConnect => "FAIL",
         _ => "ok",
     };
 
@@ -90,22 +89,35 @@ internal static class ProbeReport
         return result.Exception switch
         {
             SmtpCommandException command => $"{(int)command.StatusCode} rechazado",
-            MailKit.Security.AuthenticationException => "535 credenciales",
+            MailKit.Security.AuthenticationException authentication => AuthenticationRejection(authentication),
             NotSupportedException => "no ofrece AUTH",
             _ => "FAIL",
         };
     }
 
-    static IReadOnlyList<string> SendCommand(CliOptions options, AttemptResult recommended)
+    /// <summary>
+    /// MailKit throws the same AuthenticationException whether the server answered 534, 454 or
+    /// 535, with the code it actually sent as a "&lt;code&gt;: " prefix on Message. Printing a
+    /// fixed 535 regardless of what the server said would be inventing a fact instead of
+    /// reporting one, so the code is read back out of the message, or left unstated if for some
+    /// reason it is not there.
+    /// </summary>
+    static string AuthenticationRejection(Exception exception)
+    {
+        var message = exception.Message;
+
+        return message.Length > 3 && message[3] == ':' && message[..3].All(char.IsAsciiDigit)
+            ? $"{message[..3]} rechazado"
+            : "credenciales rechazadas";
+    }
+
+    static string SendCommand(CliOptions options, AttemptResult recommended)
     {
         var credentials = options.ShouldAuthenticate
             ? $" --user {options.User} --pass '***'"
             : " --auth none";
 
-        return
-        [
-            $"mail-tester --host {options.Host} --port {recommended.Port} --security {recommended.Security.ToCliName()}{credentials} \\",
-            $"            --from {options.From?.Address ?? "tu@dominio"} --to {options.To.FirstOrDefault()?.Address ?? "destino@dominio"}",
-        ];
+        return $"mail-tester --host {options.Host} --port {recommended.Port} --security {recommended.Security.ToCliName()}{credentials}"
+               + $" --from {options.From?.Address ?? "tu@dominio"} --to {options.To.FirstOrDefault()?.Address ?? "destino@dominio"}";
     }
 }

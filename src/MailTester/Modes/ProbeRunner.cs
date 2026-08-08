@@ -22,7 +22,14 @@ internal static class ProbeRunner
             log.Banner($"INTENTO {results.Count + 1}/{combinations.Count} — puerto {combination.Port}, security {combination.Security.ToCliName()}");
 
             var attempt = new SmtpAttempt(options, log);
-            results.Add(await attempt.RunAsync(combination.Port, combination.Security, sendMessage: false, cancellationToken));
+            var result = await attempt.RunAsync(combination.Port, combination.Security, sendMessage: false, cancellationToken);
+            results.Add(result);
+
+            // Without this, a failing attempt logs its last STEP and then the next INTENTO
+            // banner (or the final matrix, for the last one) arrives with nothing in between
+            // saying it failed -- up to nine silent-looking failures in a full sweep.
+            log.Line(result.Success ? LogLevel.Ok : LogLevel.Fail,
+                result.Success ? "intento: éxito" : $"intento: falla en fase {result.FailedPhase}");
 
             // A real Ctrl+C surfaces here as an ordinary failed AttemptResult -- SmtpAttempt
             // only recognises its own timeout as special, not the caller's token -- so the loop

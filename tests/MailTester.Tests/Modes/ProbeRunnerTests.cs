@@ -94,6 +94,35 @@ public class ProbeRunnerTests
     }
 
     [Fact]
+    public async Task A_failing_attempt_states_its_own_outcome_instead_of_leaving_it_to_the_final_matrix()
+    {
+        // Without this, a failing attempt logs its last STEP and then the next INTENTO banner
+        // (or the matrix, if it was the last one) arrives with nothing in between saying it
+        // failed -- up to nine silent-looking failures in a full sweep.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.RejectsAuth());
+
+        var (_, text) = await RunAsync(Options(server.Port, "bob@fake.local", "wrong"));
+
+        var bannerEnd = text.IndexOf("INTENTO 1/1", StringComparison.Ordinal) + "INTENTO 1/1".Length;
+        var matrixStart = text.IndexOf("MATRIZ DE RESULTADOS", StringComparison.Ordinal);
+
+        Assert.Contains("falla", text[bannerEnd..matrixStart], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task A_successful_attempt_states_its_own_outcome()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+
+        var (_, text) = await RunAsync(Options(server.Port));
+
+        var bannerEnd = text.IndexOf("INTENTO 1/1", StringComparison.Ordinal) + "INTENTO 1/1".Length;
+        var matrixStart = text.IndexOf("MATRIZ DE RESULTADOS", StringComparison.Ordinal);
+
+        Assert.Contains("éxito", text[bannerEnd..matrixStart], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Three_combinations_against_one_port_run_one_after_another_without_interleaving()
     {
         // Naming a port but not a security mode sweeps starttls, ssl and none against that one

@@ -93,6 +93,20 @@ public class ProbeReportTests
     }
 
     [Fact]
+    public void The_suggested_send_command_is_a_single_line_runnable_on_any_shell()
+    {
+        // A POSIX line continuation ('\' at end of line) is not understood by PowerShell or
+        // cmd.exe, so a command split that way is broken exactly as printed on Windows.
+        var results = new[] { Ok(587, SecurityMode.StartTls, secure: true, authenticated: true, 298) };
+
+        var text = Render(Options("a@x.com"), results, results[0]);
+
+        Assert.DoesNotContain("\\", text);
+        Assert.Contains("--from", text);
+        Assert.Contains("--to", text);
+    }
+
+    [Fact]
     public void Without_credentials_the_auth_column_is_blank_rather_than_a_failure()
     {
         var results = new[] { Ok(25, SecurityMode.None, secure: false, authenticated: false, 84) };
@@ -113,6 +127,49 @@ public class ProbeReportTests
         var text = Render(Options("a@x.com"), results, recommended: null);
 
         Assert.Contains("530", text);
+    }
+
+    [Fact]
+    public void An_authentication_exception_reports_the_code_the_server_actually_sent()
+    {
+        // MailKit's own AuthenticationException carries the server's status code as a
+        // "<code>: <text>" prefix in its Message, regardless of whether the server answered
+        // 534, 454 or 535 -- the type alone cannot tell those apart.
+        var exception = new AuthenticationException("534: 5.7.9 Application-specific password required");
+        var results = new[] { Failed(587, SecurityMode.StartTls, AttemptPhase.Authenticate, exception, 84) };
+
+        var text = Render(Options("a@x.com"), results, recommended: null);
+        var row = text.ReplaceLineEndings("\n").Split('\n').Single(l => l.TrimStart().StartsWith("587"));
+
+        Assert.Contains("534", row);
+        Assert.DoesNotContain("535", row);
+    }
+
+    [Fact]
+    public void An_authentication_exception_with_no_recognisable_code_does_not_invent_one()
+    {
+        var exception = new AuthenticationException("Authentication failed.");
+        var results = new[] { Failed(587, SecurityMode.StartTls, AttemptPhase.Authenticate, exception, 84) };
+
+        var text = Render(Options("a@x.com"), results, recommended: null);
+        var row = text.ReplaceLineEndings("\n").Split('\n').Single(l => l.TrimStart().StartsWith("587"));
+
+        Assert.DoesNotContain("535", row);
+        Assert.Contains("rechaz", row);
+    }
+
+    [Fact]
+    public void A_dns_failure_marks_its_row_as_failed_instead_of_reading_as_nothing_attempted()
+    {
+        var results = new[]
+        {
+            Failed(587, SecurityMode.StartTls, AttemptPhase.Dns, new Exception("no resuelve"), 5),
+        };
+
+        var text = Render(Options(), results, recommended: null);
+        var row = text.ReplaceLineEndings("\n").Split('\n').Single(l => l.TrimStart().StartsWith("587"));
+
+        Assert.Contains("FAIL", row);
     }
 
     [Fact]

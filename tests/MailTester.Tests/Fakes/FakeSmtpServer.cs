@@ -188,6 +188,13 @@ internal sealed class FakeSmtpServer : IDisposable
         var raw = tcp.GetStream();
         SslStream? tls = null;
 
+        // Tracks whether a real SMTP verb was ever recognised and handled, as opposed to just
+        // "some line was decoded". A client that aborts an implicit-TLS handshake sends raw
+        // ClientHello bytes, and StreamReader.ReadLineAsync can spuriously decode a "line" out of
+        // that noise if a 0x0A byte happens to land in it -- so counting decoded lines is not a
+        // reliable signal that any real conversation happened.
+        var recognizedCommand = false;
+
         try
         {
             Stream stream;
@@ -224,11 +231,13 @@ internal sealed class FakeSmtpServer : IDisposable
 
                 if (Is(line, "EHLO") || Is(line, "HELO"))
                 {
+                    recognizedCommand = true;
                     foreach (var ehloLine in script.EhloLines)
                         await writer.WriteLineAsync(ehloLine);
                 }
                 else if (script.OffersStartTls && tls is null && Is(line, "STARTTLS"))
                 {
+                    recognizedCommand = true;
                     await writer.WriteLineAsync("220 2.0.0 Ready to start TLS");
                     stream = tls = await UpgradeAsync(raw);
 
@@ -240,18 +249,22 @@ internal sealed class FakeSmtpServer : IDisposable
                 }
                 else if (Is(line, "AUTH"))
                 {
+                    recognizedCommand = true;
                     await HandleAuthAsync(line, reader, writer);
                 }
                 else if (Is(line, "MAIL FROM"))
                 {
+                    recognizedCommand = true;
                     await writer.WriteLineAsync(script.MailFromResponse);
                 }
                 else if (Is(line, "RCPT TO"))
                 {
+                    recognizedCommand = true;
                     await writer.WriteLineAsync(script.RcptToResponse);
                 }
                 else if (Is(line, "DATA"))
                 {
+                    recognizedCommand = true;
                     await writer.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>");
                     var data = await ReadDataAsync(reader);
                     lock (sync)
@@ -260,22 +273,34 @@ internal sealed class FakeSmtpServer : IDisposable
                 }
                 else if (Is(line, "QUIT"))
                 {
+                    recognizedCommand = true;
                     await writer.WriteLineAsync("221 2.0.0 Bye");
                     return;
                 }
                 else
                 {
+                    // Not a recognised verb -- most likely noise from a client that never meant
+                    // to speak plaintext SMTP here at all, such as raw TLS ClientHello bytes from
+                    // an implicit-TLS attempt. Answering with 502 without setting
+                    // recognizedCommand keeps that distinguishable from a real exchange.
                     await writer.WriteLineAsync("502 5.5.2 Unrecognized command");
                 }
             }
         }
-        catch (IOException)
+        catch (IOException) when (!recognizedCommand)
         {
-            // The client hung up without a graceful close -- most commonly here because a client
-            // attempting implicit TLS reads this fake's plaintext greeting as a bogus TLS record
-            // and aborts the connection. Unread bytes sitting in the socket at that point make
-            // the OS send a reset instead of a clean FIN, which surfaces here as a write or read
-            // failure. That is the client's doing, not a fault in this fake.
+            // The client hung up before any real SMTP verb was recognised -- most commonly here
+            // because a client attempting implicit TLS reads this fake's plaintext greeting as a
+            // bogus TLS record and aborts the connection immediately. Unread bytes sitting in the
+            // socket at that point make the OS send a reset instead of a clean FIN, which
+            // surfaces here as a write or read failure. That is the client's doing, not a fault
+            // in this fake.
+            //
+            // The guard matters: without it, an IOException anywhere in the exchange -- EHLO
+            // through QUIT, in any script -- would complete this task successfully instead of
+            // faulting it, and Dispose() would never see a real bug in the middle of a
+            // conversation. Scoping the tolerance to "before any real command was handled" keeps
+            // that safety net intact everywhere else.
         }
         finally
         {

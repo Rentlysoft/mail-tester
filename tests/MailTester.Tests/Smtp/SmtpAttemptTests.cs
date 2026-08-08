@@ -1,3 +1,4 @@
+using System.Net.Security;
 using System.Net.Sockets;
 using MailKit.Net.Smtp;
 using MailKit.Security;
@@ -226,8 +227,14 @@ public class SmtpAttemptTests
         Assert.True(result.MessageSent);
         Assert.True(result.Secure);
         Assert.NotNull(result.TlsProtocol);
+        Assert.False(string.IsNullOrWhiteSpace(result.CipherSuite));
         Assert.NotNull(result.ServerCertificate);
         Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
+        // The fake's certificate is self-signed, so the chain has no trusted root: a real
+        // handshake surfaces that as RemoteCertificateChainErrors, which is exactly what
+        // --allow-invalid-cert exists to override. The SAN covers 127.0.0.1, so no name
+        // mismatch is layered on top of it.
+        Assert.Equal(SslPolicyErrors.RemoteCertificateChainErrors, result.CertificateErrors);
     }
 
     [Fact]
@@ -242,7 +249,10 @@ public class SmtpAttemptTests
         Assert.True(result.MessageSent);
         Assert.True(result.Secure);
         Assert.NotNull(result.TlsProtocol);
+        Assert.False(string.IsNullOrWhiteSpace(result.CipherSuite));
         Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
+        // Same self-signed certificate as the STARTTLS case, so the same untrusted-root error.
+        Assert.Equal(SslPolicyErrors.RemoteCertificateChainErrors, result.CertificateErrors);
     }
 
     [Fact]

@@ -94,4 +94,32 @@ public class FailureReportTests
         Assert.Contains("SslHandshakeException: handshake roto", text);
         Assert.Contains("-> IOException: unexpected packet format", text);
     }
+
+    [Fact]
+    public void A_long_suggestion_wraps_with_its_numbering_intact_and_continuations_aligned()
+    {
+        var longSuggestion = string.Join(" ", Enumerable.Repeat("consejo", 20));
+        var (text, _) = Render("causa", "primero", longSuggestion, "tercero");
+
+        var lines = text.ReplaceLineEndings("\n").Split('\n');
+
+        var itemLine = Assert.Single(lines, line => line.StartsWith("  2) "));
+        var continuations = lines.Where(line => line.StartsWith("     consejo")).ToArray();
+
+        // The numbered prefix ("  2) ") and the continuation indent ("     ") are both five
+        // columns wide, so a wrapped line's text lines up under the item's own text rather
+        // than under its number.
+        Assert.Equal(5, itemLine.IndexOf("consejo", StringComparison.Ordinal));
+        Assert.NotEmpty(continuations);
+
+        // All twenty words of the suggestion survive whole, split across the item line and
+        // its continuations: none dropped, none broken mid-word.
+        var wordCount = new[] { itemLine }.Concat(continuations)
+            .Sum(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Count(word => word == "consejo"));
+        Assert.Equal(20, wordCount);
+
+        // The suggestions around the wrapped one keep their own numbering.
+        Assert.Contains(lines, line => line.Contains("1) primero"));
+        Assert.Contains(lines, line => line.Contains("3) tercero"));
+    }
 }

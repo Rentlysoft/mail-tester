@@ -72,6 +72,18 @@ public class SendRunnerTests
 
         var (_, text) = await RunAsync(Options(server.Port));
 
-        Assert.Contains("Message-Id", text);
+        // The label alone proves nothing: it is a fixed Spanish sentence that would still be
+        // there even if the interpolated id were dropped. Cross-checking against the id the fake
+        // server actually received in DATA is what makes this assertion able to fail.
+        var sentMessageId = ExtractMessageId(server.DataReceived!);
+        Assert.Contains(sentMessageId, text);
+    }
+
+    static string ExtractMessageId(string data)
+    {
+        var headerLine = data.ReplaceLineEndings("\n").Split('\n')
+            .Single(line => line.StartsWith("Message-Id:", StringComparison.OrdinalIgnoreCase));
+
+        return headerLine["Message-Id:".Length..].Trim().Trim('<', '>');
     }
 }

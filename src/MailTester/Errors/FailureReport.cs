@@ -13,12 +13,12 @@ internal static class FailureReport
         log.Banner($"{explanation.Title}   (después de {result.Total.TotalMilliseconds:F0} ms)");
         log.Blank();
 
-        Section(log, "Causa más probable");
+        log.Text("Causa más probable");
         foreach (var line in Wrap(explanation.ProbableCause))
             log.Text($"  {line}");
 
         log.Blank();
-        Section(log, "Qué probar");
+        log.Text("Qué probar");
         for (var i = 0; i < explanation.WhatToTry.Count; i++)
         {
             var lines = Wrap(explanation.WhatToTry[i], Width - 5);
@@ -29,15 +29,13 @@ internal static class FailureReport
         }
 
         log.Blank();
-        Section(log, "Detalle técnico");
+        log.Text("Detalle técnico");
         foreach (var line in explanation.TechnicalDetail.ReplaceLineEndings("\n").Split('\n'))
             log.Text($"  {line}");
 
         log.Blank();
         log.Line(LogLevel.Fail, $"RESULTADO: FALLA en {explanation.Phase} · exit code {(int)explanation.ExitCode}");
     }
-
-    static void Section(ConsoleLog log, string title) => log.Text(title);
 
     /// <summary>Wraps on word boundaries. A word longer than the width is left intact rather
     /// than broken: a command line or a URL is more useful whole than aligned.</summary>

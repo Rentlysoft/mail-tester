@@ -20,7 +20,7 @@ internal static class SendRunner
         }
 
         log.Blank();
-        log.Line(LogLevel.Ok, $"RESULTADO: ÉXITO · total {result.Total.TotalMilliseconds:F0} ms · exit code 0");
+        log.Line(LogLevel.Ok, $"RESULTADO: ÉXITO · total {result.Total.TotalMilliseconds:F0} ms · exit code {(int)ExitCode.Success}");
         log.Line(LogLevel.Info, $"Respuesta del servidor: {result.ServerResponse}");
         log.Line(LogLevel.Info, $"Buscá este Message-Id en los logs del servidor si el mensaje no aparece: {result.MessageId}");
 

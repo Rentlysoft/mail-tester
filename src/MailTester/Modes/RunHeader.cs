@@ -22,8 +22,8 @@ internal static class RunHeader
         log.Line(LogLevel.Conf, $"timeout={options.TimeoutSeconds}s ehlo-domain={options.EhloDomain ?? Environment.MachineName} allow-invalid-cert={options.AllowInvalidCert}");
     }
 
-    /// <summary>Length only. Printing the password in the header would defeat the redaction
-    /// applied to the protocol log two lines further down.</summary>
+    /// <summary>Length only, never the password itself. The protocol log redacts credentials
+    /// in the wire dialogue; printing the password here would defeat that.</summary>
     static string Credentials(CliOptions options) =>
         options.ShouldAuthenticate
             ? $"user={options.User} pass=*** ({options.Password?.Length ?? 0} chars)"

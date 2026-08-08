@@ -20,9 +20,9 @@ internal static class SmtpFailureExplainer
         {
             SocketException socket => FromSocket(socket, result, options, phase),
             TimeoutException => FromTimeout(result, options, phase),
-            SslHandshakeException => FromTls(result, options, phase),
+            SslHandshakeException => FromTls(result, options),
             NotSupportedException => FromNotSupported(result, options, phase),
-            MailKit.Security.AuthenticationException => FromRejectedCredentials(result, options, phase, exception),
+            MailKit.Security.AuthenticationException => FromRejectedCredentials(result, options, exception),
             SmtpCommandException command => FromCommand(command, result, options, phase),
             SmtpProtocolException => FromProtocol(result, options, phase),
             _ => Unclassified(exception, phase),
@@ -141,7 +141,7 @@ internal static class SmtpFailureExplainer
         return new FailureExplanation(Title(phase), phase, ExitCode.Timeout, cause, suggestions, Describe(result.Exception!));
     }
 
-    static FailureExplanation FromTls(AttemptResult result, CliOptions options, AttemptPhase phase)
+    static FailureExplanation FromTls(AttemptResult result, CliOptions options)
     {
         const AttemptPhase tls = AttemptPhase.TlsHandshake;
 
@@ -183,7 +183,10 @@ internal static class SmtpFailureExplainer
         }
 
         // No certificate error: the mismatch is in how TLS was started, or in versions and ciphers.
-        if (result.Security == SecurityMode.Ssl && result.Port != 465)
+        // Scoped to the ports where STARTTLS is the universal convention: a custom port doing
+        // implicit TLS legitimately is indistinguishable from this case by port number alone, so
+        // asserting "the server expects plaintext" for it would be a guess dressed up as a fact.
+        if (result.Security == SecurityMode.Ssl && IsConventionalStartTlsPort(result.Port))
         {
             return new FailureExplanation(
                 Title(tls), tls, ExitCode.TlsFailure,
@@ -246,7 +249,7 @@ internal static class SmtpFailureExplainer
             Describe(result.Exception!));
     }
 
-    static FailureExplanation FromRejectedCredentials(AttemptResult result, CliOptions options, AttemptPhase phase, Exception exception) =>
+    static FailureExplanation FromRejectedCredentials(AttemptResult result, CliOptions options, Exception exception) =>
         new(
             Title(AttemptPhase.Authenticate), AttemptPhase.Authenticate, ExitCode.AuthenticationFailure,
             "El servidor recibió las credenciales y las rechazó. La conexión y el TLS funcionan: el problema es la credencial o la política de la cuenta.",
@@ -288,7 +291,7 @@ internal static class SmtpFailureExplainer
                     Describe(exception));
 
             case SmtpStatusCode.AuthenticationInvalidCredentials:
-                return FromRejectedCredentials(result, options, AttemptPhase.Authenticate, exception);
+                return FromRejectedCredentials(result, options, exception);
 
             case SmtpStatusCode.AuthenticationMechanismTooWeak:
             case SmtpStatusCode.EncryptionRequiredForAuthenticationMechanism:
@@ -375,7 +378,7 @@ internal static class SmtpFailureExplainer
 
     static FailureExplanation FromProtocol(AttemptResult result, CliOptions options, AttemptPhase phase) =>
         new(
-            Title(phase), phase, ExitCode.TlsFailure,
+            Title(phase), phase, ExitCode.NetworkFailure,
             $"Hay algo escuchando en el puerto {result.Port} pero no habla SMTP, o un intermediario está alterando la conversación. Las líneas S: de arriba muestran lo que contestó realmente.",
             [
                 $"mail-tester --probe --host {options.Host}  (encuentra el puerto correcto)",
@@ -397,6 +400,10 @@ internal static class SmtpFailureExplainer
     static bool RequiresStartTls(string message) =>
         message.Contains("STARTTLS", StringComparison.OrdinalIgnoreCase)
         || message.Contains("5.7.0", StringComparison.Ordinal);
+
+    /// <summary>Ports where every mainstream server treats STARTTLS as the only option, so a
+    /// mismatch with implicit TLS can be named with confidence instead of merely suspected.</summary>
+    static bool IsConventionalStartTlsPort(int port) => port is 587 or 25 or 2525;
 
     static string Offered(AttemptResult result) =>
         result.AuthMechanismsOffered.Count > 0

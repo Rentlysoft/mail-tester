@@ -58,7 +58,7 @@ internal static class HelpText
           0  envío exitoso
           1  error inesperado
           2  argumentos inválidos
-          3  falla de red (DNS, conexión rechazada, host inalcanzable)
+          3  falla de red (DNS, conexión rechazada, host inalcanzable, puerto que no habla SMTP)
           4  falla de TLS (handshake, certificado, STARTTLS no disponible)
           5  falla de autenticación
           6  el servidor rechazó el envío (relay denegado, destinatario, tamaño, throttling)

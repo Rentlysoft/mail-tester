@@ -327,9 +327,31 @@ public class SmtpFailureExplainerTests
 
         var explanation = Explain(result);
 
-        Assert.Equal(ExitCode.TlsFailure, explanation.ExitCode);
+        // The bytes on the wire never parsed as SMTP at all, so TLS was never reached: this is a
+        // "wrong service" failure, not a TLS one, and a script branching on exit code should be
+        // sent to check what is actually listening, not to look at certificates.
+        Assert.Equal(ExitCode.NetworkFailure, explanation.ExitCode);
         Assert.Contains("80", explanation.ProbableCause);
         Assert.Contains("S:", explanation.ProbableCause);
+    }
+
+    [Fact]
+    public void Implicit_tls_against_a_non_conventional_port_gets_the_generic_tls_explanation()
+    {
+        // Port 8025 has no universal STARTTLS convention the way 587, 25 and 2525 do: a server
+        // there could legitimately be doing implicit TLS on purpose, so the failure should read
+        // as a generic version/cipher mismatch rather than assert "you meant STARTTLS" as fact.
+        var result = Failure(
+            new SslHandshakeException("handshake"),
+            AttemptPhase.TlsHandshake,
+            port: 8025,
+            security: SecurityMode.Ssl);
+
+        var explanation = Explain(result);
+
+        Assert.Equal(ExitCode.TlsFailure, explanation.ExitCode);
+        Assert.Contains("TLS", explanation.ProbableCause);
+        Assert.DoesNotContain(explanation.WhatToTry, s => s.Contains("--security starttls"));
     }
 
     [Fact]

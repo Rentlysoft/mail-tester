@@ -56,7 +56,7 @@ internal static class HelpText
 
         EXIT CODES
           0  envío exitoso
-          1  error inesperado
+          1  error inesperado o interrumpido
           2  argumentos inválidos
           3  falla de red (DNS, conexión rechazada, host inalcanzable, puerto que no habla SMTP)
           4  falla de TLS (handshake, certificado, STARTTLS no disponible)

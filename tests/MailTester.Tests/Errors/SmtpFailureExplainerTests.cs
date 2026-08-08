@@ -355,6 +355,60 @@ public class SmtpFailureExplainerTests
     }
 
     [Fact]
+    public void A_cancelled_attempt_is_explained_as_an_interruption_not_a_failure()
+    {
+        var explanation = Explain(Failure(new OperationCanceledException(), AttemptPhase.TcpConnect));
+
+        Assert.Equal(ExitCode.Unexpected, explanation.ExitCode);
+        Assert.Contains("Interrumpido", explanation.ProbableCause);
+        Assert.DoesNotContain("no clasificada", explanation.ProbableCause);
+        Assert.Contains(explanation.WhatToTry, s => s.Contains("Volver a correr"));
+    }
+
+    [Fact]
+    public void A_task_cancelled_exception_is_classified_the_same_as_a_plain_cancellation()
+    {
+        // TaskCanceledException derives from OperationCanceledException, and it is the concrete
+        // type MailKit and the BCL actually throw, so the switch case has to match the subtype.
+        var explanation = Explain(Failure(new TaskCanceledException(), AttemptPhase.Greeting));
+
+        Assert.Equal(ExitCode.Unexpected, explanation.ExitCode);
+        Assert.Contains("Interrumpido", explanation.ProbableCause);
+    }
+
+    [Fact]
+    public void An_interruption_after_the_message_was_sent_warns_it_may_already_be_queued()
+    {
+        var result = Failure(new OperationCanceledException(), AttemptPhase.Quit) with { MessageSent = true };
+
+        var explanation = Explain(result);
+
+        Assert.Contains(explanation.WhatToTry, s => s.Contains("encolado"));
+    }
+
+    [Fact]
+    public void An_interruption_before_sending_says_no_message_went_out()
+    {
+        var explanation = Explain(Failure(new OperationCanceledException(), AttemptPhase.TcpConnect));
+
+        Assert.Contains(explanation.WhatToTry, s => s.Contains("No llegó a enviarse"));
+    }
+
+    [Fact]
+    public void A_cancelled_probe_never_claims_a_message_might_be_queued()
+    {
+        // Probe mode never sends a message, so MessageSent cannot be true for a real probe
+        // result; this exercises the options.Probe guard directly rather than relying on that
+        // invariant to keep the guard itself untested.
+        var result = Failure(new OperationCanceledException(), AttemptPhase.Send) with { MessageSent = true };
+        var probeOptions = Options() with { Probe = true };
+
+        var explanation = Explain(result, probeOptions);
+
+        Assert.Contains(explanation.WhatToTry, s => s.Contains("No llegó a enviarse"));
+    }
+
+    [Fact]
     public void An_unclassified_exception_is_reported_honestly_rather_than_guessed_at()
     {
         var result = Failure(new InvalidOperationException("algo raro"), AttemptPhase.Send);

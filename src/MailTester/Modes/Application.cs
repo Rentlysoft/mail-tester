@@ -44,26 +44,18 @@ internal static class Application
 
         try
         {
-            var code = options.Probe
+            return options.Probe
                 ? await ProbeRunner.RunAsync(options, log, cancellationToken)
                 : await SendRunner.RunAsync(options, log, cancellationToken);
-
-            // SmtpAttempt turns an externally cancelled token into an ordinary failed result
-            // instead of throwing, so a run stopped by Ctrl+C never reaches the catch below.
-            // This is the one place that still holds the caller's own token, so it is the one
-            // place that can still tell "the user asked to stop" apart from a genuine failure
-            // that merely happened to occur after that request.
-            if (code != ExitCode.Success && cancellationToken.IsCancellationRequested)
-            {
-                log.Blank();
-                log.Line(LogLevel.Warn, "Interrumpido antes de terminar.");
-                return ExitCode.Unexpected;
-            }
-
-            return code;
         }
         catch (OperationCanceledException)
         {
+            // Unreachable today: SmtpAttempt hands its own cancellation back as an ordinary
+            // failed AttemptResult instead of throwing, and SmtpFailureExplainer now classifies
+            // that result as an interruption on its own, so SendRunner and ProbeRunner always
+            // return normally even on Ctrl+C. This stays as a safety net for a future caller
+            // that does let cancellation escape as an exception -- e.g. a step added here,
+            // outside SmtpAttempt, that is itself cancellable.
             log.Blank();
             log.Line(LogLevel.Warn, "Interrumpido antes de terminar.");
             return ExitCode.Unexpected;

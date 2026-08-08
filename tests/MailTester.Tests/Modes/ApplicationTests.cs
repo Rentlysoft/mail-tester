@@ -93,7 +93,7 @@ public class ApplicationTests
             var logged = await File.ReadAllTextAsync(path);
             Assert.Contains("S: 220 fake.local", logged);
             Assert.Contains("ÉXITO", logged);
-            Assert.Equal(output.Length, logged.Length);
+            Assert.Equal(output, logged);
         }
         finally
         {
@@ -132,5 +132,48 @@ public class ApplicationTests
 
         Assert.Equal(ExitCode.Unexpected, code);
         Assert.Contains("Interrumpido", output.ToString());
+    }
+
+    [Fact]
+    public async Task Omitting_no_color_still_completes_with_NO_COLOR_set_in_the_environment()
+    {
+        // PickColorizer suppresses colour on `options.NoColor || Console.IsOutputRedirected ||
+        // NO_COLOR env var set`. Every other test in this file passes --no-color, so the first
+        // term is always true and short-circuits the other two: neither is ever evaluated
+        // anywhere else in the suite. This test omits --no-color so evaluation can continue
+        // past the first term.
+        //
+        // It does not, however, prove the NO_COLOR term specifically: measured directly (via a
+        // temporary diagnostic assertion during development), Console.IsOutputRedirected is
+        // unconditionally true inside this xunit test host, because the test runner always
+        // pipes the test process's stdout to collect it. That means the second term already
+        // resolves the `||` to true before the NO_COLOR term is ever reached, in this test or
+        // any other in-process test. Driving true NO_COLOR-term coverage would require
+        // Console.IsOutputRedirected to be false, which no unit test can force without
+        // redirecting this process's real stdout handle -- that is a subprocess-level concern,
+        // not something achievable here. NO_COLOR is set anyway, to document the intent and
+        // because a real user relying on it would have it set; what this test actually adds is
+        // coverage for the previously untested case where --no-color is absent at all.
+        var previousNoColor = Environment.GetEnvironmentVariable("NO_COLOR");
+        Environment.SetEnvironmentVariable("NO_COLOR", "1");
+
+        try
+        {
+            using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            var code = await Application.RunAsync(
+                ["--host", "127.0.0.1", "--port", server.Port.ToString(), "--security", "none",
+                 "--from", "a@x.com", "--to", "b@y.com", "--timeout", "5"],
+                output, error, CancellationToken.None);
+
+            Assert.Equal(ExitCode.Success, code);
+            Assert.Contains("ÉXITO", output.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NO_COLOR", previousNoColor);
+        }
     }
 }

@@ -18,6 +18,10 @@ internal static class SmtpFailureExplainer
 
         return exception switch
         {
+            // Covers TaskCanceledException too: SmtpAttempt hands back its own cancellation as
+            // an ordinary failed AttemptResult instead of throwing, so this is the only place
+            // that tells the caller's Ctrl+C apart from an actual protocol or network failure.
+            OperationCanceledException => FromCancellation(result, options, phase),
             SocketException socket => FromSocket(socket, result, options, phase),
             TimeoutException => FromTimeout(result, options, phase),
             SslHandshakeException => FromTls(result, options),
@@ -28,6 +32,20 @@ internal static class SmtpFailureExplainer
             _ => Unclassified(exception, phase),
         };
     }
+
+    static FailureExplanation FromCancellation(AttemptResult result, CliOptions options, AttemptPhase phase) =>
+        new(
+            "DIAGNÓSTICO INTERRUMPIDO",
+            phase,
+            ExitCode.Unexpected,
+            $"Interrumpido antes de terminar, en la fase {phase}: esto no es una falla del servidor ni de la configuración, es una cancelación (Ctrl+C u otra señal) que cortó el diagnóstico a mitad de camino.",
+            [
+                "Volver a correr el mismo comando: nada indica que vaya a fallar, solo se cortó antes de tiempo.",
+                !options.Probe && result.MessageSent
+                    ? "El mensaje ya se había enviado cuando llegó la interrupción: puede haber quedado encolado en el servidor, conviene revisar ahí antes de reenviarlo."
+                    : "No llegó a enviarse ningún mensaje antes de la interrupción.",
+            ],
+            Describe(result.Exception!));
 
     static FailureExplanation FromSocket(SocketException exception, AttemptResult result, CliOptions options, AttemptPhase phase) =>
         exception.SocketErrorCode switch

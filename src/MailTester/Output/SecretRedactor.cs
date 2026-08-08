@@ -1,4 +1,4 @@
-using System.Text;
+using MailTester.Smtp;
 
 namespace MailTester.Output;
 
@@ -9,36 +9,51 @@ namespace MailTester.Output;
 /// the entire diagnostic value of the log. MailKit ships an IAuthenticationSecretDetector, but
 /// during an authentication exchange it flags the server's whole response as secret — including
 /// "535 Bad credentials" — so it is unusable here.
+///
+/// A credential appears on the wire in exactly two places: the payload of an AUTH command, and
+/// the client's answer to a 334 continuation challenge. The state machine below tracks only
+/// those two moments. Because masking is tied to just-issued challenges rather than to an
+/// open-ended "we are somewhere inside an exchange" flag, a server that never sends a
+/// recognisable status line cannot strand the log in a masked state: it just leaves the current
+/// step unresolved instead of opening a new one.
 /// </summary>
 internal sealed class SecretRedactor(bool showSecrets)
 {
     const string AuthVerb = "AUTH";
+    const string Mask = "***REDACTED***";
 
-    /// <summary>Open from the AUTH command until the server answers with something other than 334.</summary>
-    bool inAuthExchange;
+    ExchangeState state = ExchangeState.Idle;
 
     public string Client(string line)
     {
         if (IsAuthCommand(line, out var payloadStart))
         {
-            inAuthExchange = true;
+            state = ExchangeState.AwaitingServer;
 
             if (showSecrets || payloadStart >= line.Length)
                 return line;
 
-            return line[..payloadStart] + Mask(line[payloadStart..]);
+            return line[..payloadStart] + Mask;
         }
 
-        // LOGIN, CRAM-MD5 and NTLM answer the challenge with bare base64, so inside the
-        // exchange the whole line is opaque.
-        return inAuthExchange && !showSecrets ? Mask(line) : line;
+        if (state == ExchangeState.ExpectContinuation)
+        {
+            // LOGIN, CRAM-MD5 and NTLM answer the challenge with bare base64 that carries no
+            // AUTH prefix, so the whole line is the credential.
+            state = ExchangeState.AwaitingServer;
+            return showSecrets ? line : Mask;
+        }
+
+        return line;
     }
 
     public string Server(string line)
     {
-        if (inAuthExchange && IsFinalResponse(line))
-            inAuthExchange = false;
+        if (state != ExchangeState.Idle && SmtpStatusCode.TryParse(line, out var code))
+            state = code == 334 ? ExchangeState.ExpectContinuation : ExchangeState.Idle;
 
+        // A line with no parseable status code, or seen while Idle, changes nothing: there is
+        // no challenge to open or close here.
         return line;
     }
 
@@ -46,27 +61,56 @@ internal sealed class SecretRedactor(bool showSecrets)
     {
         payloadStart = 0;
 
-        if (!line.StartsWith(AuthVerb, StringComparison.OrdinalIgnoreCase))
+        var i = SkipSeparators(line, 0);
+        if (!MatchesAt(line, i, AuthVerb))
             return false;
 
-        if (line.Length > AuthVerb.Length && line[AuthVerb.Length] != ' ')
-            return false;
+        i += AuthVerb.Length;
 
-        var mechanismStart = AuthVerb.Length + 1;
-        if (mechanismStart >= line.Length)
-        {
-            payloadStart = line.Length;
-            return true;
-        }
+        if (i < line.Length && !IsSeparator(line[i]))
+            return false; // e.g. AUTHENTICATE, which merely starts with the letters AUTH
 
-        var separator = line.IndexOf(' ', mechanismStart);
-        payloadStart = separator < 0 ? line.Length : separator + 1;
+        i = SkipSeparators(line, i);
+        i = SkipNonSeparators(line, i); // the mechanism name, if any
+        i = SkipSeparators(line, i);
+
+        payloadStart = i;
         return true;
     }
 
-    /// <summary>334 is the challenge continuation; every other status ends the exchange.</summary>
-    static bool IsFinalResponse(string line) =>
-        line.Length >= 3 && int.TryParse(line.AsSpan(0, 3), out var code) && code != 334;
+    static bool MatchesAt(string line, int start, string token) =>
+        start + token.Length <= line.Length &&
+        string.Compare(line, start, token, 0, token.Length, StringComparison.OrdinalIgnoreCase) == 0;
 
-    static string Mask(string secret) => $"***REDACTED ({Encoding.UTF8.GetByteCount(secret)} bytes)***";
+    static int SkipSeparators(string line, int start)
+    {
+        var i = start;
+        while (i < line.Length && IsSeparator(line[i]))
+            i++;
+        return i;
+    }
+
+    static int SkipNonSeparators(string line, int start)
+    {
+        var i = start;
+        while (i < line.Length && !IsSeparator(line[i]))
+            i++;
+        return i;
+    }
+
+    static bool IsSeparator(char c) => c is ' ' or '\t';
+
+    enum ExchangeState
+    {
+        /// <summary>No exchange in progress. A client line is never masked here.</summary>
+        Idle,
+
+        /// <summary>An AUTH command (or a challenge response) was just sent; waiting for the
+        /// server to say whether that opens a new challenge or ends the exchange.</summary>
+        AwaitingServer,
+
+        /// <summary>The server just answered 334. The next client line is the answer to that
+        /// specific challenge and gets masked whole.</summary>
+        ExpectContinuation,
+    }
 }

@@ -11,19 +11,19 @@ internal sealed class PhaseDetector
 
     public AttemptPhase? FromClient(string line)
     {
-        if (StartsWith(line, "EHLO") || StartsWith(line, "HELO"))
+        if (MatchesVerb(line, "EHLO") || MatchesVerb(line, "HELO"))
             return AttemptPhase.Ehlo;
 
-        if (StartsWith(line, "STARTTLS"))
+        if (MatchesVerb(line, "STARTTLS"))
             return AttemptPhase.TlsHandshake;
 
-        if (StartsWith(line, "AUTH"))
+        if (MatchesVerb(line, "AUTH"))
             return AttemptPhase.Authenticate;
 
-        if (StartsWith(line, "MAIL FROM"))
+        if (MatchesVerb(line, "MAIL FROM"))
             return AttemptPhase.Send;
 
-        if (StartsWith(line, "QUIT"))
+        if (MatchesVerb(line, "QUIT"))
             return AttemptPhase.Quit;
 
         return null;
@@ -32,13 +32,28 @@ internal sealed class PhaseDetector
     public AttemptPhase? FromServer(string line)
     {
         // STARTTLS is also answered with 220, so only the first one is the greeting.
-        if (greetingSeen || !StartsWith(line, "220"))
+        if (greetingSeen || !line.StartsWith("220", StringComparison.OrdinalIgnoreCase))
             return null;
 
         greetingSeen = true;
         return AttemptPhase.Greeting;
     }
 
-    static bool StartsWith(string line, string token) =>
-        line.StartsWith(token, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// A bare prefix match would mistake "authorization" for AUTH, "QUITxyz" for QUIT, or
+    /// "MAIL FROMage" for MAIL FROM. The character right after the verb must end the line, or
+    /// be a space, or be a colon — the last one is for "MAIL FROM:&lt;addr&gt;", which has no
+    /// space before the address.
+    /// </summary>
+    static bool MatchesVerb(string line, string verb)
+    {
+        if (!line.StartsWith(verb, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (line.Length == verb.Length)
+            return true;
+
+        var next = line[verb.Length];
+        return next == ' ' || next == ':';
+    }
 }

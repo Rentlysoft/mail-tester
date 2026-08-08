@@ -11,7 +11,7 @@ public class SecretRedactorTests
 
         var line = redactor.Client("AUTH PLAIN AGJvYkBmYWtlLmxvY2FsAHMzY3IzdC1wNHNz");
 
-        Assert.Equal("AUTH PLAIN ***REDACTED (36 bytes)***", line);
+        Assert.Equal("AUTH PLAIN ***REDACTED***", line);
     }
 
     [Fact]
@@ -33,8 +33,8 @@ public class SecretRedactorTests
         redactor.Server("334 UGFzc3dvcmQ6");
         var password = redactor.Client("czNjcjN0LXA0c3M=");
 
-        Assert.Equal("***REDACTED (20 bytes)***", user);
-        Assert.Equal("***REDACTED (16 bytes)***", password);
+        Assert.Equal("***REDACTED***", user);
+        Assert.Equal("***REDACTED***", password);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class SecretRedactorTests
         redactor.Server("334 PDEyMzQ1Njc4OUBmYWtlLmxvY2FsPg==");
         var response = redactor.Client("Ym9iIDY5N2Y2YmNkZjliZDNmMWU2ZjhlYTU1NDdjMTk4NmY0");
 
-        Assert.StartsWith("***REDACTED (", response);
+        Assert.Equal("***REDACTED***", response);
     }
 
     [Fact]
@@ -81,7 +81,30 @@ public class SecretRedactorTests
         redactor.Client("AUTH LOGIN");
         redactor.Server("334 VXNlcm5hbWU6");
 
-        Assert.StartsWith("***REDACTED (", redactor.Client("Ym9i"));
+        Assert.Equal("***REDACTED***", redactor.Client("Ym9i"));
+    }
+
+    [Fact]
+    public void A_334_continuation_with_a_trailing_dash_still_keeps_the_exchange_open()
+    {
+        var redactor = new SecretRedactor(showSecrets: false);
+
+        redactor.Client("AUTH LOGIN");
+        redactor.Server("334-Username:");
+
+        Assert.Equal("***REDACTED***", redactor.Client("Ym9i"));
+    }
+
+    [Fact]
+    public void A_server_line_with_no_parseable_status_code_does_not_strand_the_exchange_open()
+    {
+        var redactor = new SecretRedactor(showSecrets: false);
+
+        redactor.Client("AUTH LOGIN");
+        redactor.Server("<html>this is not an SMTP reply</html>");
+        redactor.Server("235 2.7.0 Authentication successful");
+
+        Assert.Equal("MAIL FROM:<a@x.com>", redactor.Client("MAIL FROM:<a@x.com>"));
     }
 
     [Fact]
@@ -117,6 +140,30 @@ public class SecretRedactorTests
     {
         var redactor = new SecretRedactor(showSecrets: false);
 
-        Assert.Equal("auth plain ***REDACTED (8 bytes)***", redactor.Client("auth plain AGJvYgA="));
+        Assert.Equal("auth plain ***REDACTED***", redactor.Client("auth plain AGJvYgA="));
+    }
+
+    [Fact]
+    public void A_tab_separated_auth_command_still_masks_the_payload()
+    {
+        var redactor = new SecretRedactor(showSecrets: false);
+
+        Assert.Equal("AUTH\tPLAIN\t***REDACTED***", redactor.Client("AUTH\tPLAIN\tAGJvYgBwYXNz"));
+    }
+
+    [Fact]
+    public void Leading_whitespace_before_auth_does_not_defeat_recognition()
+    {
+        var redactor = new SecretRedactor(showSecrets: false);
+
+        Assert.Equal(" AUTH PLAIN ***REDACTED***", redactor.Client(" AUTH PLAIN AGJvYgBwYXNz"));
+    }
+
+    [Fact]
+    public void Extra_whitespace_between_auth_and_the_mechanism_keeps_the_mechanism_visible()
+    {
+        var redactor = new SecretRedactor(showSecrets: false);
+
+        Assert.Equal("AUTH  PLAIN ***REDACTED***", redactor.Client("AUTH  PLAIN AGJvYgBwYXNz"));
     }
 }

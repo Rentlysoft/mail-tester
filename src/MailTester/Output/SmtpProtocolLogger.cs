@@ -18,6 +18,18 @@ internal sealed class SmtpProtocolLogger(
     readonly LineBuffer clientBuffer = new();
     readonly LineBuffer serverBuffer = new();
 
+    /// <summary>Set after a client "DATA" line, until the server's reply to it is seen.</summary>
+    bool awaitingDataReply;
+
+    /// <summary>
+    /// True from a "354" reply to DATA until the client's lone "." terminator. The message body
+    /// arrives through LogClient exactly like a command would, but it is user-supplied free
+    /// text (e.g. --subject or --body), not protocol: a body line that happens to read
+    /// "AUTH PLAIN ..." must not be redacted as a credential or attributed to the Authenticate
+    /// phase.
+    /// </summary>
+    bool inDataMode;
+
     /// <summary>
     /// MailKit assigns its own detector here. It is deliberately unused: during an
     /// authentication exchange it reports the server's entire response as a secret, which
@@ -33,24 +45,56 @@ internal sealed class SmtpProtocolLogger(
     public void LogClient(byte[] buffer, int offset, int count)
     {
         foreach (var line in clientBuffer.Feed(buffer, offset, count))
-            Emit("C: ", redactor.Client(line), detector.FromClient(line));
+            EmitClient(line, reportPhase: true);
     }
 
     public void LogServer(byte[] buffer, int offset, int count)
     {
         foreach (var line in serverBuffer.Feed(buffer, offset, count))
-            Emit("S: ", redactor.Server(line), detector.FromServer(line));
+            EmitServer(line, reportPhase: true);
     }
 
     public void Dispose()
     {
-        // A server that cuts the connection mid-line still leaves evidence worth printing.
+        // A server that cuts the connection mid-line still leaves evidence worth printing. The
+        // fragment is incomplete, so no phase is attributed to it.
         if (clientBuffer.Flush() is { } clientRemainder)
-            Emit("C: ", redactor.Client(clientRemainder), null);
+            EmitClient(clientRemainder, reportPhase: false);
 
         if (serverBuffer.Flush() is { } serverRemainder)
-            Emit("S: ", redactor.Server(serverRemainder), null);
+            EmitServer(serverRemainder, reportPhase: false);
     }
+
+    void EmitClient(string line, bool reportPhase)
+    {
+        if (inDataMode)
+        {
+            if (line == ".")
+                inDataMode = false;
+
+            log.Protocol("C: ", line);
+            return;
+        }
+
+        awaitingDataReply = IsDataCommand(line);
+        var phase = reportPhase ? detector.FromClient(line) : null;
+        Emit("C: ", redactor.Client(line), phase);
+    }
+
+    void EmitServer(string line, bool reportPhase)
+    {
+        if (awaitingDataReply)
+        {
+            awaitingDataReply = false;
+            if (SmtpStatusCode.TryParse(line, out var code) && code == 354)
+                inDataMode = true;
+        }
+
+        var phase = reportPhase ? detector.FromServer(line) : null;
+        Emit("S: ", redactor.Server(line), phase);
+    }
+
+    static bool IsDataCommand(string line) => string.Equals(line, "DATA", StringComparison.OrdinalIgnoreCase);
 
     void Emit(string prefix, string line, AttemptPhase? phase)
     {

@@ -45,7 +45,8 @@ internal static class SmtpFailureExplainer
                     ? "El mensaje ya se había enviado cuando llegó la interrupción: puede haber quedado encolado en el servidor, conviene revisar ahí antes de reenviarlo."
                     : "No llegó a enviarse ningún mensaje antes de la interrupción.",
             ],
-            Describe(result.Exception!));
+            Describe(result.Exception!),
+            Interrupted: true);
 
     static FailureExplanation FromSocket(SocketException exception, AttemptResult result, CliOptions options, AttemptPhase phase) =>
         exception.SocketErrorCode switch

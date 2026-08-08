@@ -45,6 +45,40 @@ public class FailureReportTests
     }
 
     [Fact]
+    public void An_interrupted_run_is_summarised_as_interrupted_not_as_a_failure()
+    {
+        var output = new StringWriter();
+        using var log = new ConsoleLog(output, null, new NullColorizer(), () => TimeSpan.FromSeconds(1));
+
+        var explanation = new FailureExplanation(
+            "DIAGNÓSTICO INTERRUMPIDO",
+            AttemptPhase.TcpConnect,
+            ExitCode.Unexpected,
+            "Interrumpido antes de terminar: esto no es una falla del servidor ni de la configuración.",
+            ["Volver a correr el mismo comando."],
+            "TaskCanceledException: A task was canceled.",
+            Interrupted: true);
+
+        var result = new AttemptResult
+        {
+            Success = false,
+            Port = 587,
+            Security = SecurityMode.None,
+            LastPhase = AttemptPhase.TcpConnect,
+            FailedPhase = AttemptPhase.TcpConnect,
+            Total = TimeSpan.FromMilliseconds(25),
+        };
+
+        FailureReport.Render(log, explanation, result);
+        var text = output.ToString();
+
+        // The block must not contradict itself: the cause already says this was not a failure,
+        // so the summary line has to agree instead of falling back to the word it just denied.
+        Assert.Contains("RESULTADO: INTERRUMPIDO en TcpConnect", text);
+        Assert.DoesNotContain("RESULTADO: FALLA", text);
+    }
+
+    [Fact]
     public void The_sections_are_labelled_so_the_reader_knows_what_is_advice()
     {
         var (text, _) = Render("causa breve", "hacer esto");

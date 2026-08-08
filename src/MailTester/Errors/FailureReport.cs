@@ -34,7 +34,8 @@ internal static class FailureReport
             log.Text($"  {line}");
 
         log.Blank();
-        log.Line(LogLevel.Fail, $"RESULTADO: FALLA en {explanation.Phase} · exit code {(int)explanation.ExitCode}");
+        var summary = explanation.Interrupted ? "INTERRUMPIDO" : "FALLA";
+        log.Line(LogLevel.Fail, $"RESULTADO: {summary} en {explanation.Phase} · exit code {(int)explanation.ExitCode}");
     }
 
     /// <summary>Wraps on word boundaries. A word longer than the width is left intact rather

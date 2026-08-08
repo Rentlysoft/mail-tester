@@ -39,7 +39,7 @@ internal static class Application
         // Errors is empty and help was not requested, so the parser produced options.
         var options = parse.Options!;
 
-        using var log = ConsoleLogFactory.Create(options, output, out var logFileWarning);
+        using var log = ConsoleLogFactory.Create(options, output, Console.IsOutputRedirected, out var logFileWarning);
         RunHeader.Render(log, options, logFileWarning);
 
         try

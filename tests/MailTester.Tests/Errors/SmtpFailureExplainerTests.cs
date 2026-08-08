@@ -360,6 +360,7 @@ public class SmtpFailureExplainerTests
         var explanation = Explain(Failure(new OperationCanceledException(), AttemptPhase.TcpConnect));
 
         Assert.Equal(ExitCode.Unexpected, explanation.ExitCode);
+        Assert.True(explanation.Interrupted);
         Assert.Contains("Interrumpido", explanation.ProbableCause);
         Assert.DoesNotContain("no clasificada", explanation.ProbableCause);
         Assert.Contains(explanation.WhatToTry, s => s.Contains("Volver a correr"));

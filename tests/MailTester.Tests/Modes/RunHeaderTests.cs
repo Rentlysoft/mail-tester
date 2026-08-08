@@ -43,12 +43,13 @@ public class RunHeaderTests
     }
 
     [Fact]
-    public void The_password_is_never_printed_only_its_length()
+    public void The_password_is_never_printed_not_even_its_length()
     {
         var text = Render(Options());
 
         Assert.DoesNotContain("s3cr3t7", text);
-        Assert.Contains("*** (7 chars)", text);
+        Assert.Contains("pass=***", text);
+        Assert.DoesNotContain("chars)", text);
     }
 
     [Fact]

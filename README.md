@@ -83,16 +83,16 @@ es idéntico al que vas a ver contra un servidor real con STARTTLS). Muestra el 
 handshake, la autenticación, el envío y el cierre:
 
 ```
-[00:00.000] INFO  mail-tester · .NET 8.0.29 · MailKit 4.17.0.0
-[00:00.000] CONF  host=127.0.0.1:57351 security=starttls auth=auto user=bob@fake.local pass=*** (6 chars)
-[00:00.000] CONF  from=a@x.com to=b@y.com
-[00:00.000] CONF  timeout=5s ehlo-domain=PABLO-LEGION allow-invalid-cert=True
-[00:00.000] STEP  1/6 Resolviendo DNS de 127.0.0.1
-[00:00.000] INFO  El host es una IP literal: no hay resolución DNS que hacer.
-[00:00.000] OK    127.0.0.1  (0 ms)
-[00:00.000] STEP  2/6 Conectando TCP a 127.0.0.1:57351 (presupuesto total del intento: 5s)
-[00:00.000] OK    conectado a 127.0.0.1:57351 desde 127.0.0.1:57352  (0 ms)
-[00:00.000] STEP  3/6 Handshake SMTP: saludo, EHLO y TLS (starttls)
+[00:00.001] INFO  mail-tester · .NET 8.0.29 · MailKit 4.17.0.0
+[00:00.002] CONF  host=127.0.0.1:51802 security=starttls auth=auto user=bob@fake.local pass=***
+[00:00.002] CONF  from=a@x.com to=b@y.com
+[00:00.002] CONF  timeout=5s ehlo-domain=PABLO-LEGION allow-invalid-cert=True
+[00:00.020] STEP  1/6 Resolviendo DNS de 127.0.0.1
+[00:00.021] INFO  El host es una IP literal: no hay resolución DNS que hacer.
+[00:00.023] OK    127.0.0.1  (1 ms)
+[00:00.024] STEP  2/6 Conectando TCP a 127.0.0.1:51802 (presupuesto total del intento: 5s)
+[00:00.025] OK    conectado a 127.0.0.1:51802 desde 127.0.0.1:51803  (1 ms)
+[00:00.025] STEP  3/6 Handshake SMTP: saludo, EHLO y TLS (starttls)
 S: 220 fake.local ESMTP FakeServer
 C: EHLO PABLO-LEGION
 S: 250-fake.local
@@ -102,25 +102,26 @@ S: 250-STARTTLS
 S: 250 8BITMIME
 C: STARTTLS
 S: 220 2.0.0 Ready to start TLS
-[00:00.003] CERT  CN=fake.local · issuer=CN=fake.local
-[00:00.003] CERT  válido 2026-08-07 .. 2026-09-07 (29 días restantes) · SAN: fake.local, 127.0.0.1
-[00:00.003] CERT  thumbprint=B6B547CEDB74C5E61B29A4A9E1A20FA2C9C697BC · firma=sha256ECDSA
-[00:00.003] WARN  La validación del certificado falló: RemoteCertificateChainErrors
-[00:00.003] WARN    RemoteCertificateChainErrors: la cadena no valida: puede estar expirado, autofirmado, o faltar el intermedio
-[00:00.003] WARN  Certificado inválido aceptado por --allow-invalid-cert. La conexión sigue, pero no está verificada.
+[00:00.099] CERT  CN=fake.local · issuer=CN=fake.local
+[00:00.102] CERT  válido 2026-08-07 .. 2026-09-07 (29 días restantes) · SAN: fake.local, 127.0.0.1
+[00:00.102] CERT  thumbprint=4AEB6D6D47C6AA5DDB26A2E067C6EC91971562C6 · firma=sha256ECDSA
+[00:00.103] WARN  La validación del certificado falló: RemoteCertificateChainErrors
+[00:00.103] WARN    RemoteCertificateChainErrors: la cadena no valida: puede estar expirado, autofirmado, o faltar el intermedio
+[00:00.104] WARN    cadena UntrustedRoot: A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.
+[00:00.104] WARN  Certificado inválido aceptado por --allow-invalid-cert. La conexión sigue, pero no está verificada.
 C: EHLO PABLO-LEGION
 S: 250-fake.local
 S: 250-SIZE 35882577
 S: 250-AUTH PLAIN LOGIN
 S: 250-STARTTLS
 S: 250 8BITMIME
-[00:00.003] CAPS  SIZE · AUTHENTICATION · EIGHTBITMIME · STARTTLS · SIZE=35882577 · AUTH=LOGIN PLAIN
-[00:00.003] OK    handshake completo · Tls13 · TLS_AES_256_GCM_SHA384  (3 ms)
-[00:00.003] STEP  4/6 Autenticando como bob@fake.local (mecanismo: negociado por MailKit)
+[00:00.107] CAPS  SIZE · AUTHENTICATION · EIGHTBITMIME · STARTTLS · SIZE=35882577 · AUTH=LOGIN PLAIN
+[00:00.107] OK    handshake completo · Tls13 · TLS_AES_256_GCM_SHA384  (82 ms)
+[00:00.107] STEP  4/6 Autenticando como bob@fake.local (mecanismo: negociado por MailKit)
 C: AUTH PLAIN ***REDACTED***
 S: 235 2.7.0 Authentication successful
-[00:00.003] OK    autenticado como bob@fake.local  (0 ms)
-[00:00.017] STEP  5/6 Enviando mensaje a 1 destinatario(s) · Message-Id L9M45T5SZTU4.R1D91A6RMPLA2@pablo-legion
+[00:00.113] OK    autenticado como bob@fake.local  (6 ms)
+[00:00.127] STEP  5/6 Enviando mensaje a 1 destinatario(s) · Message-Id ZFASAU3VZTU4.3T6TADY2U0LH1@pablo-legion
 C: MAIL FROM:<a@x.com> SIZE=559 BODY=8BITMIME
 S: 250 2.1.0 Ok
 C: RCPT TO:<b@y.com>
@@ -129,15 +130,15 @@ C: DATA
 S: 354 End data with <CR><LF>.<CR><LF>
 [... cuerpo del mensaje omitido ...]
 S: 250 2.0.0 Ok: queued as 2A9F1B0C3D
-[00:00.032] SENT  aceptado: 2.0.0 Ok: queued as 2A9F1B0C3D  (29 ms)
-[00:00.032] STEP  6/6 Cerrando la sesión (QUIT)
+[00:00.143] SENT  aceptado: 2.0.0 Ok: queued as 2A9F1B0C3D  (30 ms)
+[00:00.143] STEP  6/6 Cerrando la sesión (QUIT)
 C: QUIT
 S: 221 2.0.0 Bye
-[00:00.033] OK    sesión cerrada  (0 ms)
+[00:00.145] OK    sesión cerrada  (2 ms)
 
-[00:00.033] OK    RESULTADO: ÉXITO · total 33 ms · exit code 0
-[00:00.033] INFO  Respuesta del servidor: 2.0.0 Ok: queued as 2A9F1B0C3D
-[00:00.033] INFO  Buscá este Message-Id en los logs del servidor si el mensaje no aparece: L9M45T5SZTU4.R1D91A6RMPLA2@pablo-legion
+[00:00.147] OK    RESULTADO: ÉXITO · total 140 ms · exit code 0
+[00:00.147] INFO  Respuesta del servidor: 2.0.0 Ok: queued as 2A9F1B0C3D
+[00:00.147] INFO  Buscá este Message-Id en los logs del servidor si el mensaje no aparece: ZFASAU3VZTU4.3T6TADY2U0LH1@pablo-legion
 ```
 
 Con `--allow-invalid-cert` la corrida sigue aunque el certificado no valide (arriba, porque
@@ -171,8 +172,8 @@ fallar el handshake con exit code 4.
 |---|---|---|
 | `--from <dirección>` | — (obligatorio salvo con `--probe`) | Remitente del mensaje. |
 | `--to <dirección>` | — (obligatorio salvo con `--probe`) | Destinatario. Repetible: se puede pasar varias veces. |
-| `--subject <texto>` | `mail-tester <timestamp UTC>` | Asunto del mensaje. |
-| `--body <texto>` | cuerpo de prueba con los datos de la conexión | Cuerpo del mensaje. |
+| `--subject <texto>` | `mail-tester <timestamp UTC>` | Asunto del mensaje. Rechazado con exit code 2 si se combina con `--probe`, que no envía ningún mensaje. |
+| `--body <texto>` | cuerpo de prueba con los datos de la conexión | Cuerpo del mensaje. Rechazado con exit code 2 si se combina con `--probe`, que no envía ningún mensaje. |
 
 ### Diagnóstico y salida
 
@@ -261,9 +262,10 @@ Las líneas `C:` y `S:` son el diálogo SMTP tal cual viaja por la red: `C:` es 
 esta herramienta, `S:` lo que contestó el servidor. Por defecto, la credencial que viaja en el
 `AUTH` se reemplaza por `***REDACTED***`; ver [Seguridad y credenciales](#seguridad-y-credenciales).
 
-Al final, una línea `RESULTADO` resume la corrida: `ÉXITO`, `FALLA` o `INTERRUMPIDO` (una
-corrida cortada por Ctrl+C, que no es una falla de configuración), la fase en la que terminó,
-y el exit code.
+Al final, una línea `RESULTADO` resume la corrida. Si fue exitosa, dice `ÉXITO`, el tiempo
+total y el exit code (`RESULTADO: ÉXITO · total 140 ms · exit code 0`, como en el ejemplo de
+arriba). Si no, dice `FALLA` o `INTERRUMPIDO` (una corrida cortada por Ctrl+C, que no es una
+falla de configuración), y ahí sí suma la fase en la que terminó junto con el exit code.
 
 ## Tabla de exit codes
 
@@ -299,9 +301,10 @@ switch ($LASTEXITCODE) {
 - Por defecto, la credencial se redacta del log del protocolo: el comando `AUTH` y la
   respuesta a un desafío `334` se reemplazan por `***REDACTED***` en las líneas `C:`.
 - `--show-secrets` desactiva esa redacción y muestra la credencial real en el diálogo `C:`/`S:`.
-- El encabezado de la corrida (línea `CONF`) nunca muestra la contraseña: solo su longitud en
-  caracteres (`pass=*** (N chars)`), para poder confirmar que se pasó el valor esperado sin
-  exponerlo. Esto no cambia con `--show-secrets`, que solo afecta el diálogo de protocolo.
+- El encabezado de la corrida (línea `CONF`) nunca muestra la contraseña, y tampoco su
+  longitud (`pass=***`, sin más): un log termina pegado en un ticket, y ni siquiera el largo
+  de la credencial es un dato que convenga publicar ahí. Esto no cambia con `--show-secrets`,
+  que solo afecta el diálogo de protocolo (líneas `C:`/`S:`), no el encabezado.
 - Usá `--pass=<valor>` (con el `=` pegado) en lugar de `--pass <valor>` cuando la contraseña
   tenga caracteres especiales, para que la shell no la altere antes de que llegue a la
   herramienta.

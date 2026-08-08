@@ -22,11 +22,12 @@ internal static class RunHeader
         log.Line(LogLevel.Conf, $"timeout={options.TimeoutSeconds}s ehlo-domain={options.EhloDomain ?? Environment.MachineName} allow-invalid-cert={options.AllowInvalidCert}");
     }
 
-    /// <summary>Length only, never the password itself. The protocol log redacts credentials
-    /// in the wire dialogue; printing the password here would defeat that.</summary>
+    /// <summary>Never the password itself, and not even its length: a log gets pasted into a
+    /// ticket, and the character count is a fact about the credential that buys the reader
+    /// nothing. The protocol log redacts the same credential in the wire dialogue.</summary>
     static string Credentials(CliOptions options) =>
         options.ShouldAuthenticate
-            ? $"user={options.User} pass=*** ({options.Password?.Length ?? 0} chars)"
+            ? $"user={options.User} pass=***"
             : "sin autenticación";
 
     static string MailKitVersion() =>

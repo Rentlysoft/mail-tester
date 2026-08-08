@@ -57,3 +57,6 @@ TestResult.xml
 nunit-*.xml
 
 docs/superpowers
+
+# Publish output of publish.ps1
+dist/

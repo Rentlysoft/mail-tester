@@ -7,7 +7,9 @@ namespace MailTester.Output;
 internal sealed class ConsoleLog(TextWriter output, TextWriter? file, IColorizer colorizer, Func<TimeSpan> elapsed)
     : IDisposable
 {
-    const int RuleWidth = 64;
+    /// <summary>Matches FailureReport.Width, so the "═" rule a banner draws is never narrower
+    /// than the explanation text wrapped underneath it.</summary>
+    public const int RuleWidth = 76;
 
     public void Line(LogLevel level, string message) =>
         Write(ColorFor(level), $"[{elapsed():mm\\:ss\\.fff}] {Label(level),-4}  {message}");

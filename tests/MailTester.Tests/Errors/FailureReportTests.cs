@@ -111,13 +111,18 @@ public class FailureReportTests
     }
 
     [Fact]
-    public void Wrapping_never_splits_a_word()
+    public void A_word_longer_than_the_width_is_left_intact_rather_than_broken()
     {
-        var cause = string.Join(" ", Enumerable.Repeat("palabralargaquenoseparte", 12));
+        // At 90 characters this single word is longer than Width (76), so it is the case Wrap's
+        // own doc comment describes: a word longer than the width is left whole. If it were
+        // split across two lines instead, this exact contiguous string would not appear anywhere
+        // in the rendered output.
+        var longWord = new string('a', 90);
+        var cause = $"antes {longWord} después";
 
         var (text, _) = Render(cause, "x");
 
-        Assert.DoesNotContain("palabralargaquenopart\n", text.ReplaceLineEndings("\n"));
+        Assert.Contains(longWord, text.ReplaceLineEndings("\n"));
     }
 
     [Fact]
@@ -127,6 +132,21 @@ public class FailureReportTests
 
         Assert.Contains("SslHandshakeException: handshake roto", text);
         Assert.Contains("-> IOException: unexpected packet format", text);
+    }
+
+    [Fact]
+    public void A_suggestion_that_already_fits_keeps_its_own_internal_spacing()
+    {
+        // Some suggestions deliberately line up a column of flags across several bullet points
+        // using extra spaces (see SmtpFailureExplainer's port/security alternatives). Splitting
+        // on whitespace and rejoining with single spaces -- which Wrap must still do for text
+        // that is actually too long to fit -- would destroy that alignment even when the text
+        // never needed to be wrapped at all.
+        var suggestion = "--port 587 --security starttls   (submission estándar)";
+
+        var (text, _) = Render("causa", suggestion);
+
+        Assert.Contains(suggestion, text);
     }
 
     [Fact]

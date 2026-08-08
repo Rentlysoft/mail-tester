@@ -5,7 +5,7 @@ namespace MailTester.Errors;
 
 internal static class FailureReport
 {
-    const int Width = 76;
+    const int Width = ConsoleLog.RuleWidth;
 
     public static void Render(ConsoleLog log, FailureExplanation explanation, AttemptResult result)
     {
@@ -39,9 +39,17 @@ internal static class FailureReport
     }
 
     /// <summary>Wraps on word boundaries. A word longer than the width is left intact rather
-    /// than broken: a command line or a URL is more useful whole than aligned.</summary>
+    /// than broken: a command line or a URL is more useful whole than aligned.
+    ///
+    /// Text that already fits is returned verbatim, spacing untouched: some suggestions line up
+    /// a column of flags with extra spaces on purpose, and splitting on whitespace to measure
+    /// words -- needed only to decide where an actually-too-long line has to break -- would
+    /// collapse that alignment down to single spaces even when no wrapping was needed at all.</summary>
     static IReadOnlyList<string> Wrap(string text, int width = Width)
     {
+        if (text.Length <= width)
+            return [text];
+
         var lines = new List<string>();
         var current = new List<string>();
         var length = 0;

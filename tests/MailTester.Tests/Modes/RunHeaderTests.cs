@@ -80,4 +80,53 @@ public class RunHeaderTests
         Assert.Contains("WARN", text);
         Assert.Contains("acceso denegado", text);
     }
+
+    [Fact]
+    public void Probe_mode_with_both_port_and_security_named_states_them_as_the_single_combination()
+    {
+        var options = Options() with { Probe = true, PortSpecified = true, SecuritySpecified = true };
+
+        var text = Render(options);
+
+        Assert.Contains("smtp.foo.com:587", text);
+        Assert.Contains("security=starttls", text);
+    }
+
+    /// <summary>The exact scenario the header used to get wrong: --security fixed, --port left
+    /// to the sweep. The old code printed the default port (587) as if it were what the run
+    /// used, even though probe mode sweeps 25/587/465/2525 for this combination.</summary>
+    [Fact]
+    public void Probe_mode_does_not_state_a_port_the_sweep_never_fixed()
+    {
+        var options = Options() with { Probe = true, PortSpecified = false, SecuritySpecified = true };
+
+        var text = Render(options);
+
+        Assert.DoesNotContain(":587", text);
+        Assert.Contains("security=starttls", text);
+        Assert.Contains("port=barre", text);
+    }
+
+    [Fact]
+    public void Probe_mode_does_not_state_a_security_mode_the_sweep_never_fixed()
+    {
+        var options = Options() with { Probe = true, PortSpecified = true, SecuritySpecified = false };
+
+        var text = Render(options);
+
+        Assert.Contains("port=587", text);
+        Assert.Contains("security=barre", text);
+    }
+
+    [Fact]
+    public void Probe_mode_with_nothing_named_says_the_whole_matrix_is_swept()
+    {
+        var options = Options() with { Probe = true, PortSpecified = false, SecuritySpecified = false };
+
+        var text = Render(options);
+
+        Assert.DoesNotContain(":587", text);
+        Assert.Contains("port=barre", text);
+        Assert.Contains("security=barre", text);
+    }
 }

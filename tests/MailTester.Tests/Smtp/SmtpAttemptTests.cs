@@ -161,6 +161,10 @@ public class SmtpAttemptTests
 
         Assert.False(result.Success);
         Assert.Equal(AttemptPhase.Dns, result.FailedPhase);
+        // FailedPhase starts at Dns and would read the same for any failure before TCP even
+        // without correct attribution; asserting the exception type is what actually proves DNS
+        // resolution is what failed, rather than just "something failed early".
+        Assert.IsType<SocketException>(result.Exception);
     }
 
     [Fact]
@@ -172,8 +176,12 @@ public class SmtpAttemptTests
         var result = await attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: true, CancellationToken.None);
 
         Assert.False(result.Success);
-        Assert.IsType<TimeoutException>(result.Exception);
+        var ex = Assert.IsType<TimeoutException>(result.Exception);
         Assert.Equal(AttemptPhase.Greeting, result.FailedPhase);
+        // MailKit has its own socket-level timeout racing the same clock; if it ever won that
+        // race instead of our own deadline, the message would be MailKit's plain English one
+        // with no phase in it, and this assertion is what would catch that regression.
+        Assert.Contains("fase", ex.Message);
     }
 
     [Fact]
@@ -200,6 +208,84 @@ public class SmtpAttemptTests
 
         Assert.False(result.Success);
         Assert.IsType<NotSupportedException>(result.Exception);
+        // A missing STARTTLS is a TLS-layer fact, not an EHLO failure: sending a user to check
+        // their EHLO handling when the real problem is "this server has no TLS" would point them
+        // at the wrong layer.
+        Assert.Equal(AttemptPhase.TlsHandshake, result.FailedPhase);
+    }
+
+    [Fact]
+    public async Task A_starttls_upgrade_reports_the_negotiated_tls_facts()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.WithStartTls());
+        var (attempt, _) = Build(Options());
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.StartTls, sendMessage: true, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(result.MessageSent);
+        Assert.True(result.Secure);
+        Assert.NotNull(result.TlsProtocol);
+        Assert.NotNull(result.ServerCertificate);
+        Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
+    }
+
+    [Fact]
+    public async Task Implicit_tls_negotiates_before_the_greeting_is_read()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.WithImplicitTls());
+        var (attempt, _) = Build(Options());
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.Ssl, sendMessage: true, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(result.MessageSent);
+        Assert.True(result.Secure);
+        Assert.NotNull(result.TlsProtocol);
+        Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
+    }
+
+    [Fact]
+    public async Task A_failed_implicit_tls_handshake_is_attributed_to_the_tls_phase_not_the_greeting()
+    {
+        // The fake here does no TLS at all: it writes the plaintext greeting immediately on
+        // accept. A client doing implicit TLS instead starts a TLS handshake right away, so it
+        // reads that plaintext greeting as a bogus TLS record and the handshake fails -- a
+        // reliable way to make implicit TLS fail without teaching the fake how to reject one.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+        var (attempt, _) = Build(Options());
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.Ssl, sendMessage: true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AttemptPhase.TlsHandshake, result.FailedPhase);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_token_reports_a_cancellation_not_a_timeout()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Silent());
+        var (attempt, _) = Build(Options(timeoutSeconds: 30));
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: true, cts.Token);
+
+        Assert.False(result.Success);
+        Assert.IsAssignableFrom<OperationCanceledException>(result.Exception);
+        Assert.IsNotType<TimeoutException>(result.Exception);
+    }
+
+    [Fact]
+    public async Task Running_the_same_attempt_twice_throws()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+        var (attempt, _) = Build(Options());
+
+        await attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: false, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: false, CancellationToken.None));
     }
 
     [Fact]

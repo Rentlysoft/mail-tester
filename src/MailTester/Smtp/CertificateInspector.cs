@@ -24,7 +24,12 @@ internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, 
             return false;
         }
 
-        var cert = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+        // Always duplicated, never just cast: the TLS stack often hands this callback an
+        // X509Certificate2 whose native handle is tied to the live SSL context. Reusing that
+        // reference instead of cloning it leaves ServerCertificate pointing at a handle that is
+        // freed as soon as the connection tears down, so any read of it after the attempt
+        // finishes -- which is the whole point of exposing it on the result -- throws.
+        var cert = new X509Certificate2(certificate);
         ServerCertificate = cert;
 
         Report(cert, chain, errors);

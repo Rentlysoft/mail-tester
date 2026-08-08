@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace MailTester.Tests.Fakes;
@@ -35,7 +38,35 @@ internal sealed record FakeSmtpScript
     /// <summary>Answer with something that is not SMTP at all.</summary>
     public string? RawGarbage { get; init; }
 
+    /// <summary>
+    /// When true, STARTTLS is answered with 220 and the connection is upgraded to TLS in
+    /// place; the client's second EHLO, sent over the now-encrypted stream, is read and
+    /// answered exactly like the first.
+    /// </summary>
+    public bool OffersStartTls { get; init; }
+
+    /// <summary>
+    /// When true, the connection is wrapped in TLS immediately on accept, before the greeting
+    /// is written -- the way an implicit-TLS (SMTPS) server behaves.
+    /// </summary>
+    public bool ImplicitTls { get; init; }
+
     public static FakeSmtpScript Working() => new();
+
+    public static FakeSmtpScript WithStartTls() => new()
+    {
+        EhloLines =
+        [
+            "250-fake.local",
+            "250-SIZE 35882577",
+            "250-AUTH PLAIN LOGIN",
+            "250-STARTTLS",
+            "250 8BITMIME",
+        ],
+        OffersStartTls = true,
+    };
+
+    public static FakeSmtpScript WithImplicitTls() => new() { ImplicitTls = true };
 
     /// <summary>Accepts the connection and then says nothing, like a firewall holding the socket open.</summary>
     public static FakeSmtpScript Silent() => new() { Greeting = null };
@@ -73,6 +104,11 @@ internal sealed class FakeSmtpServer : IDisposable
     // Encoding.UTF8 writes a byte-order-mark preamble on the stream's first write, which would
     // land in front of the greeting line and break the client's status-code parser.
     static readonly UTF8Encoding NoBomUtf8 = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>The certificate every TLS-capable script presents. Built once and shared: an
+    /// EC key pair costs nothing to reuse, and nothing here ever mutates it. Public so a test
+    /// can confirm the certificate an attempt captured is the one this fake actually sent.</summary>
+    public static readonly X509Certificate2 Certificate = CreateCertificate();
 
     readonly TcpListener listener;
     readonly Task session;
@@ -149,68 +185,131 @@ internal sealed class FakeSmtpServer : IDisposable
     async Task RunAsync()
     {
         using var tcp = await listener.AcceptTcpClientAsync(cancellation.Token);
-        using var stream = tcp.GetStream();
-        using var reader = new StreamReader(stream, NoBomUtf8);
-        await using var writer = new StreamWriter(stream, NoBomUtf8) { AutoFlush = true, NewLine = "\r\n" };
+        var raw = tcp.GetStream();
+        SslStream? tls = null;
 
-        if (script.RawGarbage is { } garbage)
+        try
         {
-            await writer.WriteAsync(garbage);
-            return;
-        }
+            Stream stream;
+            if (script.ImplicitTls)
+                stream = tls = await UpgradeAsync(raw);
+            else
+                stream = raw;
 
-        if (script.Greeting is null)
-        {
-            // Hold the socket open and say nothing, so the client hits its timeout.
-            await Task.Delay(Timeout.Infinite, cancellation.Token);
-            return;
-        }
+            var reader = new StreamReader(stream, NoBomUtf8);
+            var writer = new StreamWriter(stream, NoBomUtf8) { AutoFlush = true, NewLine = "\r\n" };
 
-        await writer.WriteLineAsync(script.Greeting);
-
-        if (script.DropAfterGreeting)
-            return;
-
-        while (await reader.ReadLineAsync(cancellation.Token) is { } line)
-        {
-            lock (sync)
-                commands.Add(line);
-
-            if (Is(line, "EHLO") || Is(line, "HELO"))
+            if (script.RawGarbage is { } garbage)
             {
-                foreach (var ehloLine in script.EhloLines)
-                    await writer.WriteLineAsync(ehloLine);
-            }
-            else if (Is(line, "AUTH"))
-            {
-                await HandleAuthAsync(line, reader, writer);
-            }
-            else if (Is(line, "MAIL FROM"))
-            {
-                await writer.WriteLineAsync(script.MailFromResponse);
-            }
-            else if (Is(line, "RCPT TO"))
-            {
-                await writer.WriteLineAsync(script.RcptToResponse);
-            }
-            else if (Is(line, "DATA"))
-            {
-                await writer.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>");
-                var data = await ReadDataAsync(reader);
-                lock (sync)
-                    dataReceived = data;
-                await writer.WriteLineAsync(script.DataAcceptedResponse);
-            }
-            else if (Is(line, "QUIT"))
-            {
-                await writer.WriteLineAsync("221 2.0.0 Bye");
+                await writer.WriteAsync(garbage);
                 return;
             }
-            else
+
+            if (script.Greeting is null)
             {
-                await writer.WriteLineAsync("502 5.5.2 Unrecognized command");
+                // Hold the socket open and say nothing, so the client hits its timeout.
+                await Task.Delay(Timeout.Infinite, cancellation.Token);
+                return;
+            }
+
+            await writer.WriteLineAsync(script.Greeting);
+
+            if (script.DropAfterGreeting)
+                return;
+
+            while (await reader.ReadLineAsync(cancellation.Token) is { } line)
+            {
+                lock (sync)
+                    commands.Add(line);
+
+                if (Is(line, "EHLO") || Is(line, "HELO"))
+                {
+                    foreach (var ehloLine in script.EhloLines)
+                        await writer.WriteLineAsync(ehloLine);
+                }
+                else if (script.OffersStartTls && tls is null && Is(line, "STARTTLS"))
+                {
+                    await writer.WriteLineAsync("220 2.0.0 Ready to start TLS");
+                    stream = tls = await UpgradeAsync(raw);
+
+                    // The client re-reads capabilities with a second EHLO sent over the now
+                    // encrypted channel; the loop picks it up through the swapped reader on its
+                    // next iteration, exactly like the first one.
+                    reader = new StreamReader(stream, NoBomUtf8);
+                    writer = new StreamWriter(stream, NoBomUtf8) { AutoFlush = true, NewLine = "\r\n" };
+                }
+                else if (Is(line, "AUTH"))
+                {
+                    await HandleAuthAsync(line, reader, writer);
+                }
+                else if (Is(line, "MAIL FROM"))
+                {
+                    await writer.WriteLineAsync(script.MailFromResponse);
+                }
+                else if (Is(line, "RCPT TO"))
+                {
+                    await writer.WriteLineAsync(script.RcptToResponse);
+                }
+                else if (Is(line, "DATA"))
+                {
+                    await writer.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>");
+                    var data = await ReadDataAsync(reader);
+                    lock (sync)
+                        dataReceived = data;
+                    await writer.WriteLineAsync(script.DataAcceptedResponse);
+                }
+                else if (Is(line, "QUIT"))
+                {
+                    await writer.WriteLineAsync("221 2.0.0 Bye");
+                    return;
+                }
+                else
+                {
+                    await writer.WriteLineAsync("502 5.5.2 Unrecognized command");
+                }
             }
         }
+        catch (IOException)
+        {
+            // The client hung up without a graceful close -- most commonly here because a client
+            // attempting implicit TLS reads this fake's plaintext greeting as a bogus TLS record
+            // and aborts the connection. Unread bytes sitting in the socket at that point make
+            // the OS send a reset instead of a clean FIN, which surfaces here as a write or read
+            // failure. That is the client's doing, not a fault in this fake.
+        }
+        finally
+        {
+            // Disposing the TLS layer here, ahead of the outer "using var tcp", flushes and tears
+            // down the SslStream before the raw socket underneath it goes away.
+            tls?.Dispose();
+        }
+    }
+
+    static async Task<SslStream> UpgradeAsync(Stream inner)
+    {
+        var tls = new SslStream(inner, leaveInnerStreamOpen: false);
+        await tls.AuthenticateAsServerAsync(Certificate, clientCertificateRequired: false, checkCertificateRevocation: false);
+        return tls;
+    }
+
+    static X509Certificate2 CreateCertificate()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=fake.local", key, HashAlgorithmName.SHA256);
+
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddDnsName("fake.local");
+        san.AddDnsName("127.0.0.1");
+        request.CertificateExtensions.Add(san.Build());
+
+        var now = DateTimeOffset.Now;
+        using var ephemeral = request.CreateSelfSigned(now.AddDays(-1), now.AddDays(30));
+
+        // SslStream.AuthenticateAsServerAsync goes through SChannel on Windows, which rejects a
+        // certificate whose private key is still the ephemeral one CreateSelfSigned attaches to
+        // it, failing with "the credentials supplied to the package were not recognized".
+        // Round-tripping the certificate through a PFX puts the key into a form SChannel accepts.
+        return new X509Certificate2(ephemeral.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.Exportable);
     }
 
     async Task HandleAuthAsync(string line, StreamReader reader, StreamWriter writer)

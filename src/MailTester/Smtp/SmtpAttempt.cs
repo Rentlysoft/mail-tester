@@ -1,9 +1,7 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
-using System.Security.Cryptography.X509Certificates;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MailTester.Cli;
@@ -42,6 +40,7 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
     bool secure;
     SslProtocols? tlsProtocol;
     string? cipherSuite;
+    bool used;
 
     public async Task<AttemptResult> RunAsync(
         int port,
@@ -49,6 +48,10 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
         bool sendMessage,
         CancellationToken cancellationToken)
     {
+        if (used)
+            throw new InvalidOperationException("SmtpAttempt es de un solo uso; hay que crear una instancia nueva por intento.");
+        used = true;
+
         clock.Restart();
 
         var inspector = new CertificateInspector(log, options.Host, options.AllowInvalidCert);
@@ -59,7 +62,11 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
             EnterPhase);
 
         using var client = new SmtpClient(logger);
-        client.Timeout = (int)options.Timeout.TotalMilliseconds;
+        // MailKit's own socket-level timeout gets clear headroom over our deadline below, so our
+        // linked token always expires first. Without it the two race, and roughly nine times out
+        // of ten MailKit wins: it throws a plain, unattributed System.TimeoutException in English,
+        // instead of the Spanish, phase-attributed one this tool is built to produce.
+        client.Timeout = (int)(options.Timeout.TotalMilliseconds * 2);
         client.LocalDomain = options.EhloDomain ?? Environment.MachineName;
         client.ServerCertificateValidationCallback = inspector.Validate;
 
@@ -78,7 +85,7 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
 
             EnterPhase(AttemptPhase.TcpConnect);
             startedAt = clock.Elapsed;
-            Step(2, $"Conectando TCP a {options.Host}:{port} (timeout {options.TimeoutSeconds}s)");
+            Step(2, $"Conectando TCP a {options.Host}:{port} (presupuesto total del intento: {options.TimeoutSeconds}s)");
             socket = await ConnectAsync(resolvedAddresses, port, token);
             connectedAddress = (socket.RemoteEndPoint as IPEndPoint)?.Address;
             localEndPoint = socket.LocalEndPoint?.ToString();
@@ -91,15 +98,18 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
             Step(3, $"Handshake SMTP: saludo, EHLO y TLS ({security.ToCliName()})");
             await client.ConnectAsync(socket, options.Host, port, security.ToSocketOptions(), token);
             CaptureConnectionFacts(client);
-            log.Line(LogLevel.Caps, string.Join(" · ", capabilities));
+            if (capabilities.Count > 0)
+                log.Line(LogLevel.Caps, string.Join(" · ", capabilities));
             Ok(secure ? $"handshake completo · {tlsProtocol} · {cipherSuite}" : "handshake completo · sin cifrado", startedAt);
 
             if (options.ShouldAuthenticate)
             {
                 EnterPhase(AttemptPhase.Authenticate);
                 startedAt = clock.Elapsed;
-                authMechanismUsed = ForceMechanism(client);
+                authMechanismUsed = ForceMechanism(client, out var advertised);
                 Step(4, $"Autenticando como {options.User} (mecanismo: {authMechanismUsed ?? "negociado por MailKit"})");
+                if (authMechanismUsed is { } forced && !advertised)
+                    log.Line(LogLevel.Warn, $"El servidor no anunció {forced}; se intenta igual para ver qué responde.");
                 await AuthenticateAsync(client, token);
                 authenticated = true;
                 authMechanismUsed ??= "negociado por MailKit";
@@ -147,7 +157,11 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
         }
         finally
         {
-            // MailKit owns the socket once it connects; if it never did, it is ours to close.
+            // MailKit wraps the socket in a NetworkStream(ownsSocket: true) the moment
+            // ConnectAsync is called, so the socket is already disposed one way or another by
+            // the time this runs, whether or not the handshake succeeded. Disposing it again is
+            // harmless because Socket.Dispose() is idempotent; this exists so the cleanup stays
+            // obviously correct even if that internal MailKit detail ever changed.
             if (socket is not null && !client.IsConnected)
                 socket.Dispose();
 
@@ -184,6 +198,15 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
                 await socket.ConnectAsync(address, port, token);
                 return socket;
             }
+            catch (OperationCanceledException)
+            {
+                // The budget ran out mid-dial. Reporting this as "could not connect" and moving
+                // on to the next address would be a lie: none of the remaining addresses were
+                // ever dialled, and an already-cancelled token would make every one of them fail
+                // instantly, printing a false warning for each.
+                socket.Dispose();
+                throw;
+            }
             catch (Exception ex)
             {
                 socket.Dispose();
@@ -207,19 +230,20 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
 
     /// <summary>
     /// Restricts MailKit to a single mechanism. A mechanism the server never advertised is still
-    /// attempted: what the server answers is information, not a reason to refuse locally.
+    /// attempted: what the server answers is information, not a reason to refuse locally. Logging
+    /// is left to the caller, so the warning prints after the step it belongs to rather than
+    /// before it.
     /// </summary>
-    string? ForceMechanism(SmtpClient client)
+    string? ForceMechanism(SmtpClient client, out bool advertised)
     {
+        advertised = true;
+
         if (options.Auth.ToSaslName() is not { } mechanism)
             return null;
 
-        var advertised = client.AuthenticationMechanisms.Contains(mechanism);
+        advertised = client.AuthenticationMechanisms.Contains(mechanism);
         client.AuthenticationMechanisms.Clear();
         client.AuthenticationMechanisms.Add(mechanism);
-
-        if (!advertised)
-            log.Line(LogLevel.Warn, $"El servidor no anunció {mechanism}; se intenta igual para ver qué responde.");
 
         return mechanism;
     }
@@ -292,21 +316,23 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
             ServerResponse = serverResponse,
             MessageId = messageId,
             Total = clock.Elapsed,
-            PhaseTimings = timings,
+            PhaseTimings = new Dictionary<AttemptPhase, TimeSpan>(timings),
         };
     }
 
     /// <summary>
     /// The phase read off the wire, overridden where the exception type knows better: a TLS
-    /// handshake failure produces no protocol lines at all.
+    /// handshake failure produces no protocol lines at all, and requiring STARTTLS against a
+    /// server that never advertised it fails locally, before any TLS record is exchanged, so the
+    /// phase detector never sees it either.
     /// </summary>
     AttemptPhase Attribute(Exception exception) => exception switch
     {
         SslHandshakeException => AttemptPhase.TlsHandshake,
+        NotSupportedException => AttemptPhase.TlsHandshake,
         // Fully qualified on purpose: System.Security.Authentication also defines an
         // AuthenticationException, and this file imports both namespaces.
         MailKit.Security.AuthenticationException => AttemptPhase.Authenticate,
-        SocketException when phase == AttemptPhase.Dns => AttemptPhase.Dns,
         _ => phase,
     };
 

@@ -41,6 +41,7 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
     SslProtocols? tlsProtocol;
     string? cipherSuite;
     bool used;
+    bool connectionFactsCaptured;
 
     public async Task<AttemptResult> RunAsync(
         int port,
@@ -256,9 +257,19 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
     /// a handshake that fails after a successful EHLO still leaves capabilities and offered
     /// mechanisms sitting on the client, and a failed attempt that never reports them would look
     /// like the EHLO itself never happened.
+    ///
+    /// Captures only once per attempt: ForceMechanism narrows client.AuthenticationMechanisms
+    /// down to a single forced mechanism before authenticating, and a second capture taken after
+    /// that -- from a catch block following a failed forced auth -- would read that narrowed
+    /// collection instead of what the server actually announced in its EHLO, corrupting both
+    /// AuthMechanismsOffered and the AUTH= entry in Capabilities.
     /// </summary>
     void CaptureConnectionFacts(SmtpClient client)
     {
+        if (connectionFactsCaptured)
+            return;
+        connectionFactsCaptured = true;
+
         secure = client.IsSecure;
         tlsProtocol = secure ? client.SslProtocol : null;
         cipherSuite = secure

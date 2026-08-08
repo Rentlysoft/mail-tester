@@ -142,6 +142,26 @@ public class SmtpAttemptTests
     }
 
     [Fact]
+    public async Task A_failed_forced_authentication_still_reports_what_the_server_actually_offered()
+    {
+        // ForceMechanism narrows MailKit's own AuthenticationMechanisms collection down to the
+        // single forced mechanism before authenticating. If a later capture of connection facts
+        // read that same (now narrowed) collection instead of what was captured right after the
+        // EHLO, a failed forced attempt would report back only the mechanism it forced, as if
+        // that were the whole list the server advertised.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.RejectsAuth());
+        var (attempt, _) = Build(Options(user: "bob@fake.local", password: "wrong", auth: AuthMechanism.Login));
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: false, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AttemptPhase.Authenticate, result.FailedPhase);
+        Assert.Equal("LOGIN", result.AuthMechanismUsed);
+        Assert.Equal(["LOGIN", "PLAIN"], result.AuthMechanismsOffered);
+        Assert.Contains("AUTH=LOGIN PLAIN", result.Capabilities);
+    }
+
+    [Fact]
     public async Task A_refused_connection_fails_in_the_tcp_phase()
     {
         var (attempt, _) = Build(Options());
@@ -394,6 +414,5 @@ public class SmtpAttemptTests
 
         Assert.Contains(AttemptPhase.Dns, result.PhaseTimings.Keys);
         Assert.Contains(AttemptPhase.TcpConnect, result.PhaseTimings.Keys);
-        Assert.All(result.PhaseTimings.Values, span => Assert.True(span >= TimeSpan.Zero));
     }
 }

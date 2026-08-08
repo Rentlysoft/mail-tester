@@ -61,6 +61,15 @@ public class HelpTextTests
     }
 
     [Fact]
+    public void Exit_code_0_also_covers_a_successful_probe_which_never_sends_anything()
+    {
+        var help = HelpText.Render();
+        var exitCodeZeroLine = help.ReplaceLineEndings("\n").Split('\n').Single(l => l.TrimStart().StartsWith("0  "));
+
+        Assert.Contains("--probe", exitCodeZeroLine);
+    }
+
+    [Fact]
     public void Help_shows_a_runnable_probe_example_and_a_runnable_send_example()
     {
         var help = HelpText.Render();

@@ -55,7 +55,7 @@ internal static class HelpText
           --help, -h              Esta ayuda.
 
         EXIT CODES
-          0  envío exitoso
+          0  envío exitoso; con --probe, que no envía nada, al menos una combinación funcionó
           1  error inesperado o interrumpido
           2  argumentos inválidos
           3  falla de red (DNS, conexión rechazada, host inalcanzable, puerto que no habla SMTP)

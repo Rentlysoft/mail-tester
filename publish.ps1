@@ -37,7 +37,12 @@ foreach ($runtime in $Runtimes) {
     }
 }
 
+$binaries = Get-ChildItem -Path $distRoot -Recurse -Include 'mail-tester', 'mail-tester.exe'
+if ($binaries.Count -ne $Runtimes.Count) {
+    throw "Se esperaban $($Runtimes.Count) binario(s), se encontraron $($binaries.Count) en $distRoot."
+}
+
 Write-Host "`nBinarios generados:" -ForegroundColor Green
-Get-ChildItem -Path $distRoot -Recurse -Include 'mail-tester', 'mail-tester.exe' |
+$binaries |
     Select-Object @{ Name = 'Ruta'; Expression = { $_.FullName.Replace("$PSScriptRoot\", '') } },
                   @{ Name = 'MB'; Expression = { [math]::Round($_.Length / 1MB, 1) } }

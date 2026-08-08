@@ -9,8 +9,6 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
     <!-- No trimming: MailKit resolves SASL mechanisms and crypto through reflection, and a
          trimmed build fails at runtime on the authentication path this tool exists to test. -->
     <PublishTrimmed>false</PublishTrimmed>

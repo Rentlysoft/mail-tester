@@ -1,0 +1,68 @@
+using MailTester.Output;
+using MailTester.Smtp;
+
+namespace MailTester.Errors;
+
+internal static class FailureReport
+{
+    const int Width = 76;
+
+    public static void Render(ConsoleLog log, FailureExplanation explanation, AttemptResult result)
+    {
+        log.Blank();
+        log.Banner($"{explanation.Title}   (después de {result.Total.TotalMilliseconds:F0} ms)");
+        log.Blank();
+
+        Section(log, "Causa más probable");
+        foreach (var line in Wrap(explanation.ProbableCause))
+            log.Text($"  {line}");
+
+        log.Blank();
+        Section(log, "Qué probar");
+        for (var i = 0; i < explanation.WhatToTry.Count; i++)
+        {
+            var lines = Wrap(explanation.WhatToTry[i], Width - 5);
+            log.Text($"  {i + 1}) {lines[0]}");
+
+            foreach (var continuation in lines.Skip(1))
+                log.Text($"     {continuation}");
+        }
+
+        log.Blank();
+        Section(log, "Detalle técnico");
+        foreach (var line in explanation.TechnicalDetail.ReplaceLineEndings("\n").Split('\n'))
+            log.Text($"  {line}");
+
+        log.Blank();
+        log.Line(LogLevel.Fail, $"RESULTADO: FALLA en {explanation.Phase} · exit code {(int)explanation.ExitCode}");
+    }
+
+    static void Section(ConsoleLog log, string title) => log.Text(title);
+
+    /// <summary>Wraps on word boundaries. A word longer than the width is left intact rather
+    /// than broken: a command line or a URL is more useful whole than aligned.</summary>
+    static IReadOnlyList<string> Wrap(string text, int width = Width)
+    {
+        var lines = new List<string>();
+        var current = new List<string>();
+        var length = 0;
+
+        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (current.Count > 0 && length + 1 + word.Length > width)
+            {
+                lines.Add(string.Join(' ', current));
+                current.Clear();
+                length = 0;
+            }
+
+            current.Add(word);
+            length += (length == 0 ? 0 : 1) + word.Length;
+        }
+
+        if (current.Count > 0)
+            lines.Add(string.Join(' ', current));
+
+        return lines.Count > 0 ? lines : [string.Empty];
+    }
+}

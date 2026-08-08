@@ -297,6 +297,37 @@ public class ArgParserTests
     }
 
     [Fact]
+    public void A_stray_value_that_itself_starts_with_a_dash_is_not_echoed()
+    {
+        // "-hunter2" looks exactly like a second, independent unknown flag once "--passs" has
+        // already been rejected -- but it is far more likely the password the user meant to pass
+        // to the flag they just mistyped, so it must not be read back to them either.
+        var errors = ParseErrors(MinimalSend("--passs", "-hunter2"));
+
+        Assert.DoesNotContain(errors, e => e.Contains("hunter2"));
+        Assert.Contains(errors, e => e.Contains("--passs"));
+        Assert.Contains(errors, e => e.Contains("posición"));
+    }
+
+    [Fact]
+    public void A_single_unknown_flag_is_still_named()
+    {
+        var errors = ParseErrors(MinimalSend("--passs", "hunter2"));
+
+        Assert.Contains(errors, e => e.Contains("--passs"));
+    }
+
+    [Fact]
+    public void A_recognised_flag_right_after_an_unknown_one_is_still_parsed()
+    {
+        var errors = ParseErrors(MinimalSend("--verbose", "--port", "25"));
+
+        Assert.Contains(errors, e => e.Contains("--verbose"));
+        Assert.DoesNotContain(errors, e => e.Contains("--port"));
+        Assert.DoesNotContain(errors, e => e.Contains("posición"));
+    }
+
+    [Fact]
     public void A_flag_missing_its_value_at_the_end_is_reported()
     {
         var errors = ParseErrors("--host");

@@ -17,9 +17,16 @@ internal static class ArgParser
         var flags = new HashSet<string>(StringComparer.Ordinal);
         var i = 0;
 
+        // Set only right after a token has been named as an unknown flag, and consumed (reset to
+        // false) by the very next token regardless of what that token turns out to be. This
+        // keeps the effect from reaching past the one token immediately following it.
+        var previousTokenWasNamedUnknownFlag = false;
+
         while (i < args.Length)
         {
             var (flag, inline) = SplitFlag(args[i]);
+            var followsNamedUnknownFlag = previousTokenWasNamedUnknownFlag;
+            previousTokenWasNamedUnknownFlag = false;
 
             switch (flag)
             {
@@ -59,13 +66,25 @@ internal static class ArgParser
                     // A token that does not start with '-' at all is not a misspelled flag: it is
                     // almost certainly a value stranded by an unrecognised flag right before it
                     // (a typo like "--passs" leaves its intended value, e.g. a password, looking
-                    // like this). Echoing it here would be the one way a credential could reach
-                    // stderr without --show-secrets, so it is never printed, not even truncated.
-                    // A token that does start with '-' is reported by its pre-'=' prefix only, so
-                    // "--pas=hunter2" never echoes the value after the '='.
-                    errors.Add(args[i].StartsWith('-')
-                        ? $"Argumento desconocido: '{flag}'. {HelpHint}"
-                        : $"Se pasó un valor en la posición {i + 1} sin un flag que lo preceda. {HelpHint}");
+                    // like this). The same is true of a token that does start with '-' when it
+                    // immediately follows a flag that was just named as unknown: it reads exactly
+                    // like a second, independent typo, but is far more likely that flag's
+                    // intended value (a typo like "--passs -hunter2" leaves the password looking
+                    // like a second unknown flag). Echoing either would be the one way a
+                    // credential could reach stderr without --show-secrets, so neither is ever
+                    // printed, not even truncated -- only reported by position.
+                    //
+                    // A token that starts with '-' and does NOT follow a freshly named unknown
+                    // flag is reported by its pre-'=' prefix only, so "--pas=hunter2" never echoes
+                    // the value after the '=', and that naming is what makes the *next* token
+                    // eligible for this same suppression.
+                    if (!args[i].StartsWith('-') || followsNamedUnknownFlag)
+                        errors.Add($"Se pasó un valor en la posición {i + 1} sin un flag que lo preceda. {HelpHint}");
+                    else
+                    {
+                        errors.Add($"Argumento desconocido: '{flag}'. {HelpHint}");
+                        previousTokenWasNamedUnknownFlag = true;
+                    }
                     break;
             }
 

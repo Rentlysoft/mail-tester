@@ -49,7 +49,7 @@ internal sealed class SecretRedactor(bool showSecrets)
 
     public string Server(string line)
     {
-        if (state != ExchangeState.Idle && SmtpStatusCode.TryParse(line, out var code))
+        if (state != ExchangeState.Idle && SmtpStatusCodeParser.TryParse(line, out var code))
             state = code == 334 ? ExchangeState.ExpectContinuation : ExchangeState.Idle;
 
         // A line with no parseable status code, or seen while Idle, changes nothing: there is

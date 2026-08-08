@@ -32,7 +32,7 @@ internal sealed class PhaseDetector
     public AttemptPhase? FromServer(string line)
     {
         // STARTTLS is also answered with 220, so only the first one is the greeting.
-        if (greetingSeen || !line.StartsWith("220", StringComparison.OrdinalIgnoreCase))
+        if (greetingSeen || !SmtpStatusCodeParser.TryParse(line, out var code) || code != 220)
             return null;
 
         greetingSeen = true;

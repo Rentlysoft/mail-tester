@@ -8,7 +8,7 @@ namespace MailTester.Smtp;
 /// valid code. A status code is exactly three ASCII digits at the start of the line — nothing
 /// else counts, and nothing else is checked.
 /// </summary>
-internal static class SmtpStatusCode
+internal static class SmtpStatusCodeParser
 {
     public static bool TryParse(string line, out int code)
     {

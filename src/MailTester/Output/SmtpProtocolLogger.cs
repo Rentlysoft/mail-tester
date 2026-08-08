@@ -86,7 +86,7 @@ internal sealed class SmtpProtocolLogger(
         if (awaitingDataReply)
         {
             awaitingDataReply = false;
-            if (SmtpStatusCode.TryParse(line, out var code) && code == 354)
+            if (SmtpStatusCodeParser.TryParse(line, out var code) && code == 354)
                 inDataMode = true;
         }
 

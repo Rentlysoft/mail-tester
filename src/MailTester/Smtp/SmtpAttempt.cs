@@ -325,11 +325,16 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
     /// handshake failure produces no protocol lines at all, and requiring STARTTLS against a
     /// server that never advertised it fails locally, before any TLS record is exchanged, so the
     /// phase detector never sees it either.
+    ///
+    /// MailKit throws NotSupportedException for two unrelated reasons: STARTTLS was required but
+    /// never advertised, and AUTH was required but the server advertised no usable mechanism.
+    /// Only the first one is a TLS-layer fact; the guard keeps the second one attributed to the
+    /// phase it actually failed in instead of being misdiagnosed as a TLS problem.
     /// </summary>
     AttemptPhase Attribute(Exception exception) => exception switch
     {
         SslHandshakeException => AttemptPhase.TlsHandshake,
-        NotSupportedException => AttemptPhase.TlsHandshake,
+        NotSupportedException when phase != AttemptPhase.Authenticate => AttemptPhase.TlsHandshake,
         // Fully qualified on purpose: System.Security.Authentication also defines an
         // AuthenticationException, and this file imports both namespaces.
         MailKit.Security.AuthenticationException => AttemptPhase.Authenticate,

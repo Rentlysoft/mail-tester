@@ -216,6 +216,30 @@ public class SmtpAttemptTests
     }
 
     [Fact]
+    public async Task No_auth_capability_fails_in_the_authenticate_phase_not_tls()
+    {
+        // MailKit throws the same NotSupportedException here as it does when STARTTLS is
+        // required but unavailable; unlike that case, this one starts authenticating first, so
+        // attributing it correctly is what tells the two apart.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working() with
+        {
+            EhloLines =
+            [
+                "250-fake.local",
+                "250-SIZE 35882577",
+                "250 8BITMIME",
+            ],
+        });
+        var (attempt, _) = Build(Options(user: "bob@fake.local", password: "s3cr3t"));
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.None, sendMessage: true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.IsType<NotSupportedException>(result.Exception);
+        Assert.Equal(AttemptPhase.Authenticate, result.FailedPhase);
+    }
+
+    [Fact]
     public async Task A_starttls_upgrade_reports_the_negotiated_tls_facts()
     {
         using var server = FakeSmtpServer.Start(FakeSmtpScript.WithStartTls());

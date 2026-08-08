@@ -176,8 +176,38 @@ public class FakeSmtpServerTests
 
         await client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.None);
         await client.AuthenticateAsync("bob@fake.local", "s3cr3t");
+
+        // Captured before QUIT, so the exchange is exactly the bare command plus its one
+        // continuation response — not asserting the digest itself, only that a round trip
+        // happened rather than the fake accepting an empty or missing continuation.
+        var commands = server.CommandsReceived;
+        var authIndex = commands.ToList().FindIndex(c => c.Equals("AUTH CRAM-MD5", StringComparison.OrdinalIgnoreCase));
+        Assert.True(authIndex >= 0, "AUTH CRAM-MD5 was not recorded");
+
+        var exchange = commands.Skip(authIndex).ToList();
+        Assert.Equal(2, exchange.Count);
+        Assert.False(string.IsNullOrEmpty(exchange[1]));
+
+        await client.DisconnectAsync(true);
+    }
+
+    [Fact]
+    public async Task A_body_ending_in_a_single_dot_line_arrives_intact_and_the_session_ends_normally()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+        using var client = new SmtpClient();
+
+        var message = Message();
+        message.Body = new TextPart("plain") { Text = "before\r\n." };
+
+        await client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.None);
+        var response = await client.SendAsync(message);
         await client.DisconnectAsync(true);
 
-        Assert.Contains(server.CommandsReceived, c => c.Equals("AUTH CRAM-MD5", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("queued as", response);
+        var lines = server.DataReceived!.Split(Environment.NewLine, StringSplitOptions.None);
+        Assert.Contains("before", lines);
+        Assert.Contains(".", lines);
+        Assert.Contains(server.CommandsReceived, c => c.StartsWith("QUIT", StringComparison.OrdinalIgnoreCase));
     }
 }

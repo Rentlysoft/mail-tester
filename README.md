@@ -249,7 +249,7 @@ Cada línea lleva un nivel a la izquierda:
 | Nivel | Significado |
 |---|---|
 | `INFO` | Información de contexto: versión, resultado de DNS, avisos generales. |
-| `CONF` | Configuración efectiva de la corrida (host, seguridad, credenciales enmascaradas, timeout). |
+| `CONF` | Configuración efectiva de la corrida (host, seguridad, credenciales enmascaradas, timeout). Con `--probe`, el puerto y la seguridad solo se muestran con un valor fijo cuando se pasaron explícitamente por línea de comandos; si el barrido los recorre, la línea dice `barre` en su lugar. |
 | `STEP` | Arranque de uno de los 6 pasos, con su número `n/6`. |
 | `OK` | Un paso terminó bien, con cuánto tardó. |
 | `CAPS` | Las capacidades que anunció el servidor en el EHLO (`SIZE`, `AUTH`, extensiones, etc.). |
@@ -271,7 +271,7 @@ falla de configuración), y ahí sí suma la fase en la que terminó junto con e
 
 | Code | Significado |
 |---|---|
-| `0` | Envío exitoso. |
+| `0` | Envío exitoso; con `--probe`, que no envía nada, significa que al menos una combinación funcionó. |
 | `1` | Error inesperado en la herramienta, o corrida interrumpida (Ctrl+C) antes de terminar. |
 | `2` | Argumentos inválidos. |
 | `3` | Falla de red: DNS que no resuelve, conexión rechazada, host inalcanzable, o un puerto que responde pero no habla SMTP. |
@@ -331,8 +331,9 @@ reemplazo de esa explicación.
 
 ## Qué no hace
 
-- No soporta XOAUTH2 ni ningún flujo de OAuth2: solo los seis mecanismos SASL de la tabla de
-  autenticación.
+- No soporta XOAUTH2 ni ningún flujo de OAuth2: solo los cuatro mecanismos SASL de la tabla de
+  autenticación (`plain`, `login`, `cram-md5`, `ntlm`; `auto` y `none` no son mecanismos SASL,
+  son formas de negociar o de saltear la autenticación).
 - No soporta autenticación por certificado de cliente (mTLS).
 - No verifica la recepción del mensaje por IMAP ni POP3: confirma que el servidor lo aceptó
   para envío, no que llegó a destino.
@@ -347,7 +348,7 @@ dotnet test
 ```
 
 El build trata los warnings como errores, así que cualquier warning nuevo rompe el build. Al
-cierre de este documento, la suite tiene 287 tests, todos en verde, ninguno saltado.
+cierre de este documento, la suite tiene 304 tests, todos en verde, ninguno saltado.
 
 Mapa de directorios de `src/MailTester`:
 

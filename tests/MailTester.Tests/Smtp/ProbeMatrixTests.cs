@@ -158,7 +158,55 @@ public class ProbeMatrixTests
 
         var worst = ProbeMatrix.MostAdvancedFailure(results);
 
+        Assert.NotNull(worst);
         Assert.Equal(AttemptPhase.Authenticate, worst.FailedPhase);
         Assert.Equal(587, worst.Port);
+    }
+
+    [Fact]
+    public void Most_advanced_failure_filters_to_failures_and_ignores_successes()
+    {
+        var results = new[]
+        {
+            Result(25, SecurityMode.None, success: true),
+            Result(587, SecurityMode.StartTls, success: false, failedPhase: AttemptPhase.Authenticate),
+            Result(465, SecurityMode.Ssl, success: true),
+        };
+
+        var worst = ProbeMatrix.MostAdvancedFailure(results);
+
+        Assert.NotNull(worst);
+        Assert.False(worst.Success);
+        Assert.Equal(AttemptPhase.Authenticate, worst.FailedPhase);
+    }
+
+    [Fact]
+    public void With_credentials_nothing_is_recommended_when_nothing_authenticated()
+    {
+        var results = new[]
+        {
+            Result(25, SecurityMode.None, secure: true, authenticated: false),
+            Result(587, SecurityMode.StartTls, secure: true, authenticated: false),
+        };
+
+        var recommended = ProbeMatrix.Recommend(results, credentialsGiven: true);
+
+        Assert.Null(recommended);
+    }
+
+    [Fact]
+    public void Most_advanced_failure_ranks_ssl_with_completed_handshake_ahead_of_plaintext_at_same_phase()
+    {
+        var results = new[]
+        {
+            Result(465, SecurityMode.Ssl, success: false, failedPhase: AttemptPhase.Greeting, totalMs: 200),
+            Result(25, SecurityMode.None, success: false, failedPhase: AttemptPhase.Greeting, totalMs: 100),
+        };
+
+        var worst = ProbeMatrix.MostAdvancedFailure(results);
+
+        Assert.NotNull(worst);
+        Assert.Equal(465, worst.Port);
+        Assert.Equal(SecurityMode.Ssl, worst.Security);
     }
 }

@@ -6,8 +6,6 @@ internal sealed record ProbeCombination(int Port, SecurityMode Security);
 
 internal static class ProbeMatrix
 {
-    static readonly int[] DefaultPorts = [25, 587, 465, 2525];
-
     /// <summary>
     /// Curated per port rather than a full cartesian product: sweeping every mode against every
     /// port would spend timeouts on combinations nobody deploys. The order within each port is
@@ -20,6 +18,8 @@ internal static class ProbeMatrix
         (465, [SecurityMode.Ssl, SecurityMode.StartTls]),
         (2525, [SecurityMode.StartTls, SecurityMode.None]),
     ];
+
+    static readonly int[] DefaultPorts = [.. Curated.Select(entry => entry.Port)];
 
     static readonly SecurityMode[] ModesForANamedPort = [SecurityMode.StartTls, SecurityMode.Ssl, SecurityMode.None];
 
@@ -49,21 +49,23 @@ internal static class ProbeMatrix
             .FirstOrDefault();
 
     /// <summary>
-    /// The failure that got furthest is the one whose explanation is most useful. The ranking is
-    /// approximate for implicit TLS, where the handshake precedes the greeting.
+    /// The failure that got furthest is the one whose explanation is most useful. For implicit TLS
+    /// (Ssl), the handshake precedes the greeting, so a failure at greeting with completed
+    /// handshake is more advanced than a plaintext failure at the same phase.
     /// </summary>
-    public static AttemptResult MostAdvancedFailure(IReadOnlyList<AttemptResult> results) =>
+    public static AttemptResult? MostAdvancedFailure(IReadOnlyList<AttemptResult> results) =>
         results
-            .OrderByDescending(result => Rank(result.FailedPhase ?? result.LastPhase))
+            .Where(result => !result.Success)
+            .OrderByDescending(result => Rank(result.Security, result.FailedPhase ?? result.LastPhase))
             .ThenBy(result => result.Total)
-            .First();
+            .FirstOrDefault();
 
-    static int Rank(AttemptPhase phase) => phase switch
+    static int Rank(SecurityMode security, AttemptPhase phase) => phase switch
     {
         AttemptPhase.Dns => 0,
         AttemptPhase.TcpConnect => 1,
-        AttemptPhase.Greeting => 2,
-        AttemptPhase.TlsHandshake => 3,
+        AttemptPhase.TlsHandshake => security == SecurityMode.Ssl ? 2 : 3,
+        AttemptPhase.Greeting => security == SecurityMode.Ssl ? 3 : 2,
         AttemptPhase.Ehlo => 4,
         AttemptPhase.Authenticate => 5,
         AttemptPhase.Send => 6,

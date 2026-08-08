@@ -77,8 +77,10 @@ internal sealed class FakeSmtpServer : IDisposable
     readonly TcpListener listener;
     readonly Task session;
     readonly CancellationTokenSource cancellation = new();
+    readonly object sync = new();
     readonly List<string> commands = [];
     readonly FakeSmtpScript script;
+    string? dataReceived;
 
     FakeSmtpServer(FakeSmtpScript script, TcpListener listener)
     {
@@ -94,12 +96,19 @@ internal sealed class FakeSmtpServer : IDisposable
     {
         get
         {
-            lock (commands)
+            lock (sync)
                 return [.. commands];
         }
     }
 
-    public string? DataReceived { get; private set; }
+    public string? DataReceived
+    {
+        get
+        {
+            lock (sync)
+                return dataReceived;
+        }
+    }
 
     public static FakeSmtpServer Start(FakeSmtpScript script)
     {
@@ -115,14 +124,26 @@ internal sealed class FakeSmtpServer : IDisposable
 
         try
         {
-            session.Wait(TimeSpan.FromSeconds(5));
+            // This is test infrastructure: a session that does not stop within the grace period
+            // is a bug in the fake, not something to swallow silently behind a slow test.
+            if (!session.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("FakeSmtpServer session did not stop within 5 seconds of cancellation.");
         }
-        catch (AggregateException)
+        catch (AggregateException ex)
         {
-            // A cancelled or reset session is the normal way this server ends.
-        }
+            // A cancelled or reset session is the normal way this server ends. Anything else
+            // is a real fault in the session loop and must not disappear silently.
+            var faults = ex.Flatten().InnerExceptions
+                .Where(inner => inner is not OperationCanceledException)
+                .ToArray();
 
-        cancellation.Dispose();
+            if (faults.Length > 0)
+                throw new AggregateException(faults);
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
     }
 
     async Task RunAsync()
@@ -152,7 +173,7 @@ internal sealed class FakeSmtpServer : IDisposable
 
         while (await reader.ReadLineAsync(cancellation.Token) is { } line)
         {
-            lock (commands)
+            lock (sync)
                 commands.Add(line);
 
             if (Is(line, "EHLO") || Is(line, "HELO"))
@@ -175,7 +196,9 @@ internal sealed class FakeSmtpServer : IDisposable
             else if (Is(line, "DATA"))
             {
                 await writer.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>");
-                DataReceived = await ReadDataAsync(reader);
+                var data = await ReadDataAsync(reader);
+                lock (sync)
+                    dataReceived = data;
                 await writer.WriteLineAsync(script.DataAcceptedResponse);
             }
             else if (Is(line, "QUIT"))
@@ -213,7 +236,7 @@ internal sealed class FakeSmtpServer : IDisposable
     {
         if (await reader.ReadLineAsync(cancellation.Token) is { } line)
         {
-            lock (commands)
+            lock (sync)
                 commands.Add(line);
         }
     }
@@ -223,7 +246,13 @@ internal sealed class FakeSmtpServer : IDisposable
         var body = new StringBuilder();
 
         while (await reader.ReadLineAsync(cancellation.Token) is { } line && line != ".")
-            body.AppendLine(line);
+        {
+            // RFC 5321 dot-stuffing: a sender prefixes any line that starts with a period with
+            // one extra period, so the wire form of a content line beginning with "." always has
+            // two or more leading periods. Undo that by dropping exactly one leading period; the
+            // sole "." terminator line itself is already excluded by the loop condition above.
+            body.AppendLine(line.StartsWith('.') ? line[1..] : line);
+        }
 
         return body.ToString();
     }

@@ -116,4 +116,68 @@ public class FakeSmtpServerTests
         await Assert.ThrowsAsync<NotSupportedException>(
             () => client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.StartTls));
     }
+
+    [Fact]
+    public async Task A_body_line_that_is_a_single_dot_arrives_unstuffed()
+    {
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.Working());
+        using var client = new SmtpClient();
+
+        var message = Message();
+        message.Body = new TextPart("plain") { Text = "before\r\n.\r\nafter" };
+
+        await client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.None);
+        await client.SendAsync(message);
+        await client.DisconnectAsync(true);
+
+        var lines = server.DataReceived!.Split(Environment.NewLine, StringSplitOptions.None);
+        Assert.Contains(".", lines);
+        Assert.DoesNotContain("..", lines);
+    }
+
+    [Fact]
+    public async Task Auth_login_completes_the_username_and_password_challenge()
+    {
+        var script = FakeSmtpScript.Working() with
+        {
+            EhloLines =
+            [
+                "250-fake.local",
+                "250-AUTH LOGIN",
+                "250 8BITMIME",
+            ],
+        };
+        using var server = FakeSmtpServer.Start(script);
+        using var client = new SmtpClient();
+
+        await client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.None);
+        await client.AuthenticateAsync("bob@fake.local", "s3cr3t");
+        await client.DisconnectAsync(true);
+
+        Assert.Contains(server.CommandsReceived, c => c.Equals("AUTH LOGIN", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(server.CommandsReceived, c => c == Convert.ToBase64String("bob@fake.local"u8.ToArray()));
+        Assert.Contains(server.CommandsReceived, c => c == Convert.ToBase64String("s3cr3t"u8.ToArray()));
+    }
+
+    [Fact]
+    public async Task Auth_cram_md5_completes_the_single_challenge()
+    {
+        var script = FakeSmtpScript.Working() with
+        {
+            EhloLines =
+            [
+                "250-fake.local",
+                "250-AUTH CRAM-MD5",
+                "250 8BITMIME",
+            ],
+        };
+        using var server = FakeSmtpServer.Start(script);
+        using var client = new SmtpClient();
+
+        await client.ConnectAsync("127.0.0.1", server.Port, SecureSocketOptions.None);
+        await client.AuthenticateAsync("bob@fake.local", "s3cr3t");
+        await client.DisconnectAsync(true);
+
+        Assert.Contains(server.CommandsReceived, c => c.Equals("AUTH CRAM-MD5", StringComparison.OrdinalIgnoreCase));
+    }
 }

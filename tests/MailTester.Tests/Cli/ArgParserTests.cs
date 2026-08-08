@@ -277,6 +277,26 @@ public class ArgParserTests
     }
 
     [Fact]
+    public void An_unknown_flag_with_an_inline_value_does_not_echo_the_value()
+    {
+        var errors = ParseErrors(MinimalSend("--pas=hunter2"));
+
+        Assert.Contains(errors, e => e.Contains("--pas"));
+        Assert.DoesNotContain(errors, e => e.Contains("hunter2"));
+    }
+
+    [Fact]
+    public void A_stray_value_left_over_from_a_misspelled_flag_is_not_echoed()
+    {
+        // "--passs" (typo) is rejected as an unknown flag on its own, which leaves "hunter2" -- a
+        // password that was meant to be its value -- looking like a second, standalone argument.
+        var errors = ParseErrors(MinimalSend("--passs", "hunter2"));
+
+        Assert.DoesNotContain(errors, e => e.Contains("hunter2"));
+        Assert.Contains(errors, e => e.Contains("--help"));
+    }
+
+    [Fact]
     public void A_flag_missing_its_value_at_the_end_is_reported()
     {
         var errors = ParseErrors("--host");

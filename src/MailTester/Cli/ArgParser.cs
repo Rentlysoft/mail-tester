@@ -56,7 +56,16 @@ internal static class ArgParser
                     break;
 
                 default:
-                    errors.Add($"Argumento desconocido: '{args[i]}'. {HelpHint}");
+                    // A token that does not start with '-' at all is not a misspelled flag: it is
+                    // almost certainly a value stranded by an unrecognised flag right before it
+                    // (a typo like "--passs" leaves its intended value, e.g. a password, looking
+                    // like this). Echoing it here would be the one way a credential could reach
+                    // stderr without --show-secrets, so it is never printed, not even truncated.
+                    // A token that does start with '-' is reported by its pre-'=' prefix only, so
+                    // "--pas=hunter2" never echoes the value after the '='.
+                    errors.Add(args[i].StartsWith('-')
+                        ? $"Argumento desconocido: '{flag}'. {HelpHint}"
+                        : $"Se pasó un valor en la posición {i + 1} sin un flag que lo preceda. {HelpHint}");
                     break;
             }
 

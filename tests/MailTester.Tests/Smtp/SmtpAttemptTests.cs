@@ -319,6 +319,26 @@ public class SmtpAttemptTests
     }
 
     [Fact]
+    public async Task Implicit_tls_that_completes_the_handshake_and_then_says_nothing_fails_at_the_greeting()
+    {
+        // The certificate is accepted -- proof the handshake got that far -- and then the server
+        // holds the socket open without ever sending the 220 that implicit TLS expects next.
+        // Blaming TlsHandshake here would contradict the handshake having just succeeded.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.WithImplicitTls() with { Greeting = null });
+        var (attempt, _) = Build(Options(timeoutSeconds: 1));
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.Ssl, sendMessage: true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.IsType<TimeoutException>(result.Exception);
+        Assert.Equal(AttemptPhase.Greeting, result.FailedPhase);
+        // MailKit only populates IsSecure/SslProtocol once ConnectAsync itself returns, which
+        // never happens here; the certificate came straight from CertificateInspector instead,
+        // proof on its own that the handshake -- not just the TCP connect -- got this far.
+        Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
+    }
+
+    [Fact]
     public async Task A_failed_implicit_tls_handshake_is_attributed_to_the_tls_phase_not_the_greeting()
     {
         // The fake here does no TLS at all: it writes the plaintext greeting immediately on

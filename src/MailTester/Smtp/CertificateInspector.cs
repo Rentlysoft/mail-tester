@@ -7,8 +7,13 @@ namespace MailTester.Smtp;
 /// <summary>
 /// Reports the server certificate and decides whether to accept it. The certificate is always
 /// reported, valid or not: "which certificate did I actually get" is usually the question.
+///
+/// <paramref name="onAccepted"/> fires on both paths that end in acceptance -- a clean chain, or
+/// an invalid one let through by <paramref name="allowInvalid"/> -- and never on rejection. It
+/// lets a caller notice that the handshake reached certificate validation without this type
+/// knowing anything about phases or callers.
 /// </summary>
-internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, bool allowInvalid)
+internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, bool allowInvalid, Action onAccepted)
 {
     public X509Certificate2? ServerCertificate { get; private set; }
 
@@ -35,12 +40,16 @@ internal sealed class CertificateInspector(ConsoleLog log, string expectedHost, 
         Report(cert, chain, errors);
 
         if (errors == SslPolicyErrors.None)
+        {
+            onAccepted();
             return true;
+        }
 
         if (!allowInvalid)
             return false;
 
         log.Line(LogLevel.Warn, "Certificado inválido aceptado por --allow-invalid-cert. La conexión sigue, pero no está verificada.");
+        onAccepted();
         return true;
     }
 

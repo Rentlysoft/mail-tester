@@ -23,11 +23,12 @@ public class CertificateInspectorTests
         return request.CreateSelfSigned(notBefore, now.AddDays(daysUntilExpiry));
     }
 
-    static (CertificateInspector Inspector, StringWriter Output) Build(string expectedHost, bool allowInvalid)
+    static (CertificateInspector Inspector, StringWriter Output) Build(
+        string expectedHost, bool allowInvalid, Action? onAccepted = null)
     {
         var output = new StringWriter();
         var log = new ConsoleLog(output, null, new NullColorizer(), () => TimeSpan.Zero);
-        return (new CertificateInspector(log, expectedHost, allowInvalid), output);
+        return (new CertificateInspector(log, expectedHost, allowInvalid, onAccepted ?? (() => { })), output);
     }
 
     [Fact]
@@ -193,5 +194,52 @@ public class CertificateInspectorTests
         Assert.False(accepted);
         Assert.Contains("no presentó certificado", output.ToString());
         Assert.Null(inspector.ServerCertificate);
+    }
+
+    [Fact]
+    public void A_valid_certificate_accepted_invokes_the_callback()
+    {
+        var accepted = false;
+        var (inspector, _) = Build("smtp.foo.com", allowInvalid: false, () => accepted = true);
+        using var certificate = SelfSigned("smtp.foo.com", ["smtp.foo.com"]);
+
+        inspector.Validate(this, certificate, null, SslPolicyErrors.None);
+
+        Assert.True(accepted);
+    }
+
+    [Fact]
+    public void An_invalid_certificate_accepted_under_allow_invalid_cert_invokes_the_callback()
+    {
+        var accepted = false;
+        var (inspector, _) = Build("smtp.foo.com", allowInvalid: true, () => accepted = true);
+        using var certificate = SelfSigned("otro.host", ["otro.host"]);
+
+        inspector.Validate(this, certificate, null, SslPolicyErrors.RemoteCertificateNameMismatch);
+
+        Assert.True(accepted);
+    }
+
+    [Fact]
+    public void A_rejected_certificate_does_not_invoke_the_callback()
+    {
+        var accepted = false;
+        var (inspector, _) = Build("smtp.foo.com", allowInvalid: false, () => accepted = true);
+        using var certificate = SelfSigned("otro.host", ["otro.host"]);
+
+        inspector.Validate(this, certificate, null, SslPolicyErrors.RemoteCertificateNameMismatch);
+
+        Assert.False(accepted);
+    }
+
+    [Fact]
+    public void A_missing_certificate_does_not_invoke_the_callback()
+    {
+        var accepted = false;
+        var (inspector, _) = Build("smtp.foo.com", allowInvalid: true, () => accepted = true);
+
+        inspector.Validate(this, null, null, SslPolicyErrors.RemoteCertificateNotAvailable);
+
+        Assert.False(accepted);
     }
 }

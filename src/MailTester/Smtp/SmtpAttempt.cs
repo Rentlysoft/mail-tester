@@ -55,7 +55,15 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
 
         clock.Restart();
 
-        var inspector = new CertificateInspector(log, options.Host, options.AllowInvalidCert);
+        // Implicit TLS has no STARTTLS command for PhaseDetector to observe, so an accepted
+        // certificate is the signal that the handshake got far enough that a greeting is the
+        // very next thing expected. Under STARTTLS the certificate is validated mid-EHLO and
+        // what follows is the second EHLO, not a greeting, so this only applies to SecurityMode.Ssl.
+        var inspector = new CertificateInspector(log, options.Host, options.AllowInvalidCert, onAccepted: () =>
+        {
+            if (security == SecurityMode.Ssl)
+                EnterPhase(AttemptPhase.Greeting);
+        });
         var logger = new SmtpProtocolLogger(
             log,
             new SecretRedactor(options.ShowSecrets),

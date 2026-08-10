@@ -338,6 +338,44 @@ public class SmtpAttemptTests
         Assert.Equal(FakeSmtpServer.Certificate.Thumbprint, result.ServerCertificate!.Thumbprint);
     }
 
+    /// <summary>
+    /// Guards the one line that decides whether an accepted certificate advances to Greeting.
+    /// An end-to-end run cannot exercise this directly: under STARTTLS, MailKit re-issues EHLO
+    /// unconditionally the instant the handshake succeeds, and PhaseDetector's own client-side
+    /// hook advances the phase to Ehlo before any later failure -- server-driven or a timeout --
+    /// can be observed, overwriting a wrongly-set Greeting regardless of whether this guard is
+    /// right. Verified by literally removing the guard and rerunning every STARTTLS test in this
+    /// file, including one where the fake never answers the second EHLO at all: FailedPhase came
+    /// back identical either way. Only a direct call catches this guard being dropped or inverted.
+    /// </summary>
+    [Theory]
+    [InlineData(SecurityMode.Ssl, AttemptPhase.Greeting)]
+    [InlineData(SecurityMode.StartTls, null)]
+    [InlineData(SecurityMode.StartTlsIfAvailable, null)]
+    [InlineData(SecurityMode.None, null)]
+    internal void Certificate_acceptance_advances_to_greeting_only_under_implicit_tls(SecurityMode security, AttemptPhase? expected) =>
+        Assert.Equal(expected, SmtpAttempt.PhaseAfterCertificateAccepted(security));
+
+    [Fact]
+    public async Task A_rejected_auth_under_starttls_is_never_misattributed_to_the_greeting()
+    {
+        // Documents the end-to-end outcome the guard above protects: a STARTTLS attempt that
+        // accepts the certificate and then fails later (here, on the credentials) must never
+        // report Greeting, since implicit TLS is the only path where a greeting is still ahead
+        // of the certificate at all.
+        using var server = FakeSmtpServer.Start(FakeSmtpScript.WithStartTls() with
+        {
+            AuthResponse = "535 5.7.8 Error: authentication failed",
+        });
+        var (attempt, _) = Build(Options(user: "bob@fake.local", password: "wrong"));
+
+        var result = await attempt.RunAsync(server.Port, SecurityMode.StartTls, sendMessage: true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AttemptPhase.Authenticate, result.FailedPhase);
+        Assert.NotEqual(AttemptPhase.Greeting, result.FailedPhase);
+    }
+
     [Fact]
     public async Task A_failed_implicit_tls_handshake_is_attributed_to_the_tls_phase_not_the_greeting()
     {

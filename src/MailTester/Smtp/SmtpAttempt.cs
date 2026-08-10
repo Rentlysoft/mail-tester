@@ -55,14 +55,10 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
 
         clock.Restart();
 
-        // Implicit TLS has no STARTTLS command for PhaseDetector to observe, so an accepted
-        // certificate is the signal that the handshake got far enough that a greeting is the
-        // very next thing expected. Under STARTTLS the certificate is validated mid-EHLO and
-        // what follows is the second EHLO, not a greeting, so this only applies to SecurityMode.Ssl.
         var inspector = new CertificateInspector(log, options.Host, options.AllowInvalidCert, onAccepted: () =>
         {
-            if (security == SecurityMode.Ssl)
-                EnterPhase(AttemptPhase.Greeting);
+            if (PhaseAfterCertificateAccepted(security) is { } next)
+                EnterPhase(next);
         });
         var logger = new SmtpProtocolLogger(
             log,
@@ -347,6 +343,18 @@ internal sealed class SmtpAttempt(CliOptions options, ConsoleLog log)
             PhaseTimings = new Dictionary<AttemptPhase, TimeSpan>(timings),
         };
     }
+
+    /// <summary>
+    /// Implicit TLS has no STARTTLS command for PhaseDetector to observe, so an accepted
+    /// certificate is the signal that the handshake got far enough that a greeting is the very
+    /// next thing expected. Under STARTTLS the certificate is validated mid-EHLO, and what
+    /// follows is the second EHLO, not a greeting -- MailKit re-issues it immediately once the
+    /// handshake succeeds, and PhaseDetector picks that up on its own, so advancing here too
+    /// would only race that write for no benefit, and would misattribute anything that failed
+    /// in between as a greeting timeout instead of a TLS one.
+    /// </summary>
+    internal static AttemptPhase? PhaseAfterCertificateAccepted(SecurityMode security) =>
+        security == SecurityMode.Ssl ? AttemptPhase.Greeting : null;
 
     /// <summary>
     /// The phase read off the wire, overridden where the exception type knows better: a TLS
